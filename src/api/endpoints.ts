@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction } from '../../shared/types'
 
 const BASE = '/api'
 
@@ -83,4 +83,16 @@ export async function updateNoteApi(id: string, title: string, text: string): Pr
 export async function deleteNoteApi(id: string): Promise<void> {
   const res = await fetch(`${BASE}/notes/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Delete note error: ${res.status}`)
+}
+
+export async function fetchPredictions(): Promise<Prediction[]> {
+  const res = await fetch(`${BASE}/predictions`)
+  if (!res.ok) throw new Error(`Predictions error: ${res.status}`)
+  return res.json()
+}
+
+export async function backfillPredictions(): Promise<{ extracted: number; summaries: number }> {
+  const res = await fetch(`${BASE}/predictions/backfill`, { method: 'POST' })
+  if (!res.ok) throw new Error(`Backfill error: ${res.status}`)
+  return res.json()
 }

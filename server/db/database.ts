@@ -47,6 +47,21 @@ db.exec(`
   )
 `)
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS predictions (
+    id           TEXT PRIMARY KEY,
+    summary_id   TEXT NOT NULL,
+    video_title  TEXT NOT NULL DEFAULT '',
+    video_url    TEXT NOT NULL DEFAULT '',
+    channel_name TEXT NOT NULL DEFAULT '',
+    asset_name   TEXT NOT NULL DEFAULT '',
+    direction    TEXT NOT NULL DEFAULT '',
+    target       TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (summary_id) REFERENCES summaries(id) ON DELETE CASCADE
+  )
+`)
+
 const existingKeys = db.query('SELECT key FROM settings').all() as { key: string }[]
 const existing = new Set(existingKeys.map(r => r.key))
 const defaults: Record<string, string> = {

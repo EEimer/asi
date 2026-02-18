@@ -10,6 +10,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/api/events': { target: 'http://localhost:8788', changeOrigin: true, headers: { 'Cache-Control': 'no-transform' } },
       '/api': { target: 'http://localhost:8788', changeOrigin: true },
     },
   },

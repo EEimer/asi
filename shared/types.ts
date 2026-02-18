@@ -48,6 +48,18 @@ export interface Note {
   updatedAt: string
 }
 
+export interface Prediction {
+  id: string
+  summaryId: string
+  videoTitle: string
+  videoUrl: string
+  channelName: string
+  assetName: string
+  direction: string
+  target: string
+  createdAt: string
+}
+
 export type ProcessingStep = 'queued' | 'metadata' | 'transcript' | 'summarizing' | 'done' | 'error'
 
 export interface ProcessingEvent {

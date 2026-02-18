@@ -2,6 +2,8 @@ import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, deleteSummary, getSummarizedVideoIds } from './db/summaries'
 import { getAllNotes, createNote, updateNote, deleteNote } from './db/notes'
+import { getAllPredictions, insertPredictions, deletePredictionsBySummary } from './db/predictions'
+import { extractPredictions } from './services/tableParser'
 import { getSettings, updateSettings } from './db/settings'
 import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSubtitles, extractVideoId } from './services/youtube'
 import { summarizeTranscript } from './services/summarizer'
@@ -32,7 +34,7 @@ async function processSummary(id: string, videoUrl: string, lang: string, knownT
     const thumbnail = meta.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
     updateSummaryMeta(id, title, meta.channel, thumbnail)
 
-    emitStep(id, title, 'transcript', `Untertitel werden heruntergeladen (${lang})...`)
+    emitStep(id, title, 'transcript', `Untertitel werden heruntergeladen (${lang}, en)...`)
     const { text: transcript, usedLang } = await downloadSubtitles(videoUrl, lang)
     if (usedLang !== lang) emitStep(id, title, 'transcript', `Kein '${lang}' gefunden, verwende '${usedLang}'`)
 
@@ -40,6 +42,12 @@ async function processSummary(id: string, videoUrl: string, lang: string, knownT
     const settings = loadSettings()
     const summary = await summarizeTranscript(transcript)
     updateSummaryDone(id, transcript, summary, settings.summaryPrompt)
+
+    const predictions = extractPredictions(summary)
+    if (predictions.length) {
+      insertPredictions(id, title, videoUrl, meta.channel, predictions)
+      console.log(`[predictions] ${predictions.length} extracted from ${title}`)
+    }
 
     emitStep(id, title, 'done', 'Fertig!')
     console.log(`[done] ${title}`)
@@ -141,9 +149,27 @@ const app = new Elysia()
   })
 
   .delete('/api/summaries/:id', ({ params }) => {
+    deletePredictionsBySummary(params.id)
     const ok = deleteSummary(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return { ok: true }
+  })
+
+  // Predictions
+  .get('/api/predictions', () => getAllPredictions())
+
+  .post('/api/predictions/backfill', () => {
+    const summaries = getAllSummaries().filter(s => s.status === 'done' && s.summary)
+    let total = 0
+    for (const s of summaries) {
+      deletePredictionsBySummary(s.id)
+      const rows = extractPredictions(s.summary ?? '')
+      if (rows.length) {
+        insertPredictions(s.id, s.videoTitle, s.videoUrl, s.channelName, rows)
+        total += rows.length
+      }
+    }
+    return { ok: true, extracted: total, summaries: summaries.length }
   })
 
   // Notes CRUD

@@ -157,7 +157,7 @@ export default function BrowseView() {
                   <h3 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2">{v.title}</h3>
                   <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
                     {v.channel}
-                    {v.channel && <button onClick={() => handleBlock(v.channel)} title={`${v.channel} blockieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
+                    {v.channel && <button onClick={() => handleBlock(v.channel)} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
                   </p>
                   {v.uploadDate && <p className="text-xs text-slate-400 mt-0.5">{v.uploadDate}</p>}
                 </div>

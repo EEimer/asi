@@ -30,8 +30,7 @@ export default function ProcessingConsole() {
     let retryTimer: ReturnType<typeof setTimeout>
 
     function connect() {
-      const sseUrl = import.meta.env.DEV ? 'http://localhost:8788/api/events' : '/api/events'
-      es = new EventSource(sseUrl)
+      es = new EventSource('/api/events')
       es.onmessage = (e) => {
         try {
           const event: ProcessingEvent = JSON.parse(e.data)

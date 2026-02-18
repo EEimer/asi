@@ -1,8 +1,9 @@
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { Youtube, FileText, StickyNote, Settings } from 'lucide-react'
+import { Youtube, FileText, Gem, StickyNote, Settings } from 'lucide-react'
 import BrowseView from './views/BrowseView'
 import SummariesView from './views/SummariesView'
 import SummaryDetailView from './views/SummaryDetailView'
+import GlaskugelView from './views/GlaskugelView'
 import NotesView from './views/NotesView'
 import SettingsView from './views/SettingsView'
 import ToastStack from './components/ToastStack'
@@ -11,6 +12,7 @@ import ProcessingConsole from './components/ProcessingConsole'
 const navItems = [
   { to: '/browse', label: 'Browse', icon: Youtube },
   { to: '/summaries', label: 'Zusammenfassungen', icon: FileText },
+  { to: '/glaskugel', label: 'Glaskugel', icon: Gem },
   { to: '/notes', label: 'Notizen', icon: StickyNote },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -42,6 +44,7 @@ export default function App() {
           <Route path="/browse" element={<BrowseView />} />
           <Route path="/summaries" element={<SummariesView />} />
           <Route path="/summaries/:id" element={<SummaryDetailView />} />
+          <Route path="/glaskugel" element={<GlaskugelView />} />
           <Route path="/notes" element={<NotesView />} />
           <Route path="/settings" element={<SettingsView />} />
         </Routes>
