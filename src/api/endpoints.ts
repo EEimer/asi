@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, Settings } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note } from '../../shared/types'
 
 const BASE = '/api'
 
@@ -53,4 +53,34 @@ export async function updateSettings(settings: Partial<Settings>): Promise<void>
     body: JSON.stringify(settings),
   })
   if (!res.ok) throw new Error(`Settings update error: ${res.status}`)
+}
+
+export async function fetchNotes(): Promise<Note[]> {
+  const res = await fetch(`${BASE}/notes`)
+  if (!res.ok) throw new Error(`Notes error: ${res.status}`)
+  return res.json()
+}
+
+export async function createNoteApi(title: string, text: string): Promise<Note> {
+  const res = await fetch(`${BASE}/notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, text }),
+  })
+  if (!res.ok) throw new Error(`Create note error: ${res.status}`)
+  return res.json()
+}
+
+export async function updateNoteApi(id: string, title: string, text: string): Promise<void> {
+  const res = await fetch(`${BASE}/notes/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, text }),
+  })
+  if (!res.ok) throw new Error(`Update note error: ${res.status}`)
+}
+
+export async function deleteNoteApi(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/notes/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete note error: ${res.status}`)
 }

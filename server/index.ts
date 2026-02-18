@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, deleteSummary, getSummarizedVideoIds } from './db/summaries'
+import { getAllNotes, createNote, updateNote, deleteNote } from './db/notes'
 import { getSettings, updateSettings } from './db/settings'
 import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSubtitles, extractVideoId } from './services/youtube'
 import { summarizeTranscript } from './services/summarizer'
@@ -141,6 +142,25 @@ const app = new Elysia()
 
   .delete('/api/summaries/:id', ({ params }) => {
     const ok = deleteSummary(params.id)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
+  })
+
+  // Notes CRUD
+  .get('/api/notes', () => getAllNotes())
+
+  .post('/api/notes', ({ body }) => {
+    return createNote(body.title, body.text)
+  }, { body: t.Object({ title: t.String(), text: t.String() }) })
+
+  .put('/api/notes/:id', ({ params, body }) => {
+    const ok = updateNote(params.id, body.title, body.text)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
+  }, { body: t.Object({ title: t.String(), text: t.String() }) })
+
+  .delete('/api/notes/:id', ({ params }) => {
+    const ok = deleteNote(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return { ok: true }
   })

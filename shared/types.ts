@@ -40,6 +40,14 @@ export interface CreateSummaryRequest {
   lang?: string
 }
 
+export interface Note {
+  id: string
+  title: string
+  text: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type ProcessingStep = 'queued' | 'metadata' | 'transcript' | 'summarizing' | 'done' | 'error'
 
 export interface ProcessingEvent {

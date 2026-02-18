@@ -37,6 +37,16 @@ db.exec(`
   )
 `)
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notes (
+    id         TEXT PRIMARY KEY,
+    title      TEXT NOT NULL DEFAULT '',
+    text       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`)
+
 const existingKeys = db.query('SELECT key FROM settings').all() as { key: string }[]
 const existing = new Set(existingKeys.map(r => r.key))
 const defaults: Record<string, string> = {
