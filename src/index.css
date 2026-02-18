@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: 29 78 216;
+  --danger: 198 84 84;
+  --success: 16 185 129;
+  --accent: 139 92 246;
+  --warning: 245 158 11;
+  --text: 17 24 39;
+  --panel: 250 252 255;
+  --border: 210 220 232;
+}
+
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+
+.prose { color: #334155; line-height: 1.7; }
+.prose h1, .prose h2, .prose h3, .prose h4 { color: #0f172a; font-weight: 600; margin-top: 1.5em; margin-bottom: 0.5em; }
+.prose h1 { font-size: 1.25rem; }
+.prose h2 { font-size: 1.125rem; }
+.prose h3 { font-size: 1rem; }
+.prose p { margin-bottom: 0.75em; }
+.prose strong { color: #0f172a; font-weight: 600; }
+.prose ul, .prose ol { padding-left: 1.5em; margin-bottom: 0.75em; }
+.prose ul { list-style-type: disc; }
+.prose ol { list-style-type: decimal; }
+.prose li { margin-bottom: 0.25em; }
+.prose li > ul, .prose li > ol { margin-top: 0.25em; margin-bottom: 0; }
+.prose a { color: rgb(var(--primary)); text-decoration: underline; }
+.prose a:hover { opacity: 0.8; }
+.prose blockquote { border-left: 3px solid #cbd5e1; padding-left: 1em; color: #64748b; font-style: italic; margin: 1em 0; }
+.prose code { background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 0.25rem; font-size: 0.85em; }
+.prose pre { background: #f1f5f9; padding: 1em; border-radius: 0.5rem; overflow-x: auto; margin: 1em 0; }
+.prose pre code { background: none; padding: 0; }
+.prose table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.875rem; }
+.prose th, .prose td { border: 1px solid #e2e8f0; padding: 0.5em 0.75em; text-align: left; }
+.prose th { background: #f8fafc; font-weight: 600; color: #0f172a; }
+.prose tr:nth-child(even) { background: #f8fafc; }
+.prose hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.5em 0; }
+.prose img { max-width: 100%; border-radius: 0.5rem; }
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
