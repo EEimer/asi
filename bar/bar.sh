@@ -1,16 +1,21 @@
 #!/bin/bash
 
-# Checken ob Bun mit deinem Server läuft
-APP_RUNNING=$(ps aux | grep "[b]un" | grep "server/index.ts")
+SERVER_RUNNING=$(ps aux | grep "[b]un" | grep "server/index.ts")
+VITE_RUNNING=$(ps aux | grep "[v]ite" | grep -v "grep")
 
-if [ -z "$APP_RUNNING" ]; then
+if [ -z "$SERVER_RUNNING" ]; then
   echo "👾 Off | color=red"
   echo "---"
-  # Wir rufen jetzt direkt dein neues Wrapper-Skript auf
-  echo "▶️ Server starten | shell='/Users/ee/Documents/asi/run_bun.sh' terminal=true refresh=true"
+  echo "▶️ Server starten | shell='/Users/ee/Documents/asi/run_bun.sh' terminal=false refresh=true"
 else
-  echo "🚀 On | color=green"
+  if [ -n "$VITE_RUNNING" ]; then
+    echo "👾"
+  else
+    echo "⚡ Server only | color=orange"
+  fi
   echo "---"
-  echo "🌐 Browser | shell='open' param1='http://localhost:3000' terminal=false"
-  echo "🛑 Stop | shell='/usr/bin/pkill' param1='-f' param2='bun.*index.ts' terminal=false refresh=true"
+  echo "🌐 Browser | shell='open' param1='http://localhost:5173' terminal=false"
+  echo "📡 API | shell='open' param1='http://localhost:8788' terminal=false"
+  echo "---"
+  echo "🛑 Stop | shell='/Users/ee/Documents/asi/stop_bun.sh' terminal=false refresh=true"
 fi
