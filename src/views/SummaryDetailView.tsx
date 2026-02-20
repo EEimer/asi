@@ -322,12 +322,12 @@ export default function SummaryDetailView() {
           <div className="border-t border-slate-100">
             <button onClick={() => setShowTranscript(!showTranscript)}
               className="w-full flex items-center justify-between p-5 text-sm text-slate-500 hover:bg-slate-50 transition-colors">
-              <span>Transkript ({summary.transcript.length.toLocaleString('de-DE')} Zeichen)</span>
+              <span>Transkript ({summary.transcript.length.toLocaleString('de-DE')} Zeichen · {summary.transcript.split(/\s+/).filter(Boolean).length.toLocaleString('de-DE')} Wörter)</span>
               {showTranscript ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
             {showTranscript && (
               <div className="px-5 pb-5">
-                <div className="bg-slate-50 rounded-lg p-4 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto">{summary.transcript}</div>
+                <div className="bg-slate-50 rounded-lg p-4 text-xs text-slate-600 leading-relaxed max-h-96 overflow-y-auto">{summary.transcript.replace(/\n/g, ' ')}</div>
               </div>
             )}
           </div>
