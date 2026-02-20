@@ -29,3 +29,8 @@ export function deleteNote(id: string): boolean {
   const result = db.query('DELETE FROM notes WHERE id = ?').run(id)
   return result.changes > 0
 }
+
+export function deleteAllNotes(): number {
+  const result = db.query('DELETE FROM notes').run()
+  return result.changes
+}

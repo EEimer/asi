@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchPredictions, backfillPredictions } from '../api/endpoints'
+import { fetchPredictions, deletePrediction } from '../api/endpoints'
 import type { Prediction } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import { useToast } from '../store/toastStore'
+import { Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2 } from 'lucide-react'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 const directionStyle = (d: string) => {
   const lower = d.toLowerCase()
@@ -15,9 +15,8 @@ const directionStyle = (d: string) => {
 export default function GlaskugelView() {
   const [predictions, setPredictions] = useState<Prediction[]>([])
   const [loading, setLoading] = useState(true)
-  const [backfilling, setBackfilling] = useState(false)
   const [filter, setFilter] = useState('')
-  const { addToast } = useToast()
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   useEffect(() => { load() }, [])
 
@@ -26,20 +25,16 @@ export default function GlaskugelView() {
     finally { setLoading(false) }
   }
 
-  async function handleBackfill() {
-    setBackfilling(true)
-    try {
-      const result = await backfillPredictions()
-      addToast(`${result.extracted} Prognosen aus ${result.summaries} Zusammenfassungen extrahiert`, 'success', 4000)
-      load()
-    } catch (e: any) { addToast(`Fehler: ${e.message}`, 'error', 5000) }
-    finally { setBackfilling(false) }
+  async function handleDelete(id: string) {
+    await deletePrediction(id)
+    setPredictions(prev => prev.filter(p => p.id !== id))
+    setDeleteTarget(null)
   }
 
   const filtered = predictions.filter(p => {
     if (!filter) return true
     const q = filter.toLowerCase()
-    return p.assetName.toLowerCase().includes(q) || p.channelName.toLowerCase().includes(q) || p.direction.toLowerCase().includes(q)
+    return p.assetName.toLowerCase().includes(q) || p.channelName.toLowerCase().includes(q) || p.direction.toLowerCase().includes(q) || (p.author ?? '').toLowerCase().includes(q) || (p.ifCases ?? '').toLowerCase().includes(q)
   })
 
   // Group by date
@@ -60,15 +55,9 @@ export default function GlaskugelView() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-slate-900">Glaskugel</h2>
-          <span className="text-xs text-slate-400">{predictions.length} Prognosen</span>
-        </div>
-        <button onClick={handleBackfill} disabled={backfilling} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50">
-          {backfilling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-          Aus Zusammenfassungen neu extrahieren
-        </button>
+      <div className="flex items-center gap-3 mb-4">
+        <h2 className="text-lg font-semibold text-slate-900">Glaskugel</h2>
+        <span className="text-xs text-slate-400">{predictions.length} Prognosen</span>
       </div>
 
       <input type="text" placeholder="Filtern nach Asset, Kanal, Richtung..." value={filter} onChange={e => setFilter(e.target.value)}
@@ -77,7 +66,7 @@ export default function GlaskugelView() {
       {predictions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400">
           <p className="text-sm mb-2">Noch keine Prognosen</p>
-          <p className="text-xs">Fasse Videos zusammen die Asset-Tabellen enthalten, oder klicke oben auf "Neu extrahieren"</p>
+          <p className="text-xs">Fasse Videos zusammen und füge Prognosen über die Zusammenfassung hinzu</p>
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -86,17 +75,18 @@ export default function GlaskugelView() {
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="text-left px-4 py-3 font-semibold text-slate-700">Asset</th>
                 <th className="text-left px-4 py-3 font-semibold text-slate-700">Richtung</th>
-                <th className="text-left px-4 py-3 font-semibold text-slate-700">Prognose / Kursziele</th>
+                <th className="text-left px-4 py-3 font-semibold text-slate-700">Kursziel</th>
+                <th className="text-left px-4 py-3 font-semibold text-slate-700">Bedingung</th>
                 <th className="text-left px-4 py-3 font-semibold text-slate-700">Autor</th>
                 <th className="text-left px-4 py-3 font-semibold text-slate-700">Video</th>
-                <th className="text-left px-4 py-3 font-semibold text-slate-700 w-20">Datum</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
               {grouped.map(group => (
                 <>{/* Fragment with key on the separator row */}
                   <tr key={`sep-${group.date}`}>
-                    <td colSpan={6} className="px-4 py-2 bg-slate-50/50 border-t border-slate-100">
+                    <td colSpan={7} className="px-4 py-2 bg-slate-50/50 border-t border-slate-100">
                       <span className="text-xs font-medium text-slate-500">{group.label}</span>
                     </td>
                   </tr>
@@ -111,8 +101,9 @@ export default function GlaskugelView() {
                             <DirIcon className="w-3 h-3" /> {p.direction}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-slate-600 max-w-xs">{p.target}</td>
-                        <td className="px-4 py-2.5 text-slate-500 text-xs">{p.channelName}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{p.priceTarget}</td>
+                        <td className="px-4 py-2.5 text-slate-500 text-xs max-w-xs">{p.ifCases}</td>
+                        <td className="px-4 py-2.5 text-slate-500 text-xs">{p.author || p.channelName}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
                             <Link to={`/summaries/${p.summaryId}`} className="text-xs text-primary hover:underline truncate max-w-[150px]" title={p.videoTitle}>
@@ -123,8 +114,10 @@ export default function GlaskugelView() {
                             </a>
                           </div>
                         </td>
-                        <td className="px-4 py-2.5 text-xs text-slate-400 tabular-nums whitespace-nowrap">
-                          {new Date(p.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        <td className="w-10 px-2 py-2.5 text-center">
+                          <button onClick={() => setDeleteTarget(p.id)} className="p-1 text-slate-300 hover:text-danger hover:bg-red-50 rounded transition-colors" title="Löschen">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </td>
                       </tr>
                     )
@@ -135,6 +128,16 @@ export default function GlaskugelView() {
           </table>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        title="Prognose löschen"
+        description="Möchtest du diesen Eintrag wirklich löschen?"
+        confirmLabel="Löschen"
+        variant="danger"
+      />
     </div>
   )
 }

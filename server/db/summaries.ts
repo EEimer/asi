@@ -1,9 +1,9 @@
 import db from './database'
 import type { Summary, SummaryListItem } from '../../shared/types'
 
-const LIST_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries ORDER BY created_at DESC`
+const LIST_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries ORDER BY created_at DESC`
 
-const DETAIL_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, thumbnail_url AS thumbnailUrl, lang, transcript, summary, custom_prompt AS customPrompt, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries WHERE id = ?`
+const DETAIL_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, thumbnail_url AS thumbnailUrl, lang, transcript, summary, custom_prompt AS customPrompt, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries WHERE id = ?`
 
 export function getAllSummaries(): SummaryListItem[] {
   return db.query(LIST_QUERY).all() as SummaryListItem[]
@@ -32,6 +32,14 @@ export function updateSummaryDone(id: string, transcript: string, summary: strin
   db.query('UPDATE summaries SET transcript = ?, summary = ?, custom_prompt = ?, status = ? WHERE id = ?').run(transcript, summary, prompt, 'done', id)
 }
 
+export function updateSummaryLang(id: string, lang: string) {
+  db.query('UPDATE summaries SET lang = ? WHERE id = ?').run(lang, id)
+}
+
+export function updateSummaryAuthor(id: string, author: string) {
+  db.query('UPDATE summaries SET author = ? WHERE id = ?').run(author, id)
+}
+
 export function updateSummaryError(id: string, errorMessage: string) {
   db.query('UPDATE summaries SET error_message = ?, status = ? WHERE id = ?').run(errorMessage, 'error', id)
 }
@@ -39,4 +47,9 @@ export function updateSummaryError(id: string, errorMessage: string) {
 export function deleteSummary(id: string): boolean {
   const result = db.query('DELETE FROM summaries WHERE id = ?').run(id)
   return result.changes > 0
+}
+
+export function deleteAllSummaries(): number {
+  const result = db.query('DELETE FROM summaries').run()
+  return result.changes
 }

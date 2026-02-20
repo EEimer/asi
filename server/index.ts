@@ -1,10 +1,10 @@
 import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
-import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, deleteSummary, getSummarizedVideoIds } from './db/summaries'
-import { getAllNotes, createNote, updateNote, deleteNote } from './db/notes'
-import { getAllPredictions, insertPredictions, deletePredictionsBySummary } from './db/predictions'
-import { extractPredictions } from './services/tableParser'
-import { getSettings, updateSettings } from './db/settings'
+import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
+import { getAllNotes, createNote, updateNote, deleteNote, deleteAllNotes } from './db/notes'
+import { getAllPredictions, insertPredictions, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
+import { extractSummaryMeta } from './services/tableParser'
+import { getSettings, updateSettings, resetSettings } from './db/settings'
 import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSubtitles, extractVideoId } from './services/youtube'
 import { summarizeTranscript } from './services/summarizer'
 import { loadSettings } from './config'
@@ -36,17 +36,20 @@ async function processSummary(id: string, videoUrl: string, lang: string, knownT
 
     emitStep(id, title, 'transcript', `Untertitel werden heruntergeladen (${lang}, en)...`)
     const { text: transcript, usedLang } = await downloadSubtitles(videoUrl, lang)
-    if (usedLang !== lang) emitStep(id, title, 'transcript', `Kein '${lang}' gefunden, verwende '${usedLang}'`)
+    if (usedLang !== lang) {
+      emitStep(id, title, 'transcript', `Kein '${lang}' gefunden, verwende '${usedLang}'`)
+      updateSummaryLang(id, usedLang)
+    }
 
     emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${loadSettings().openaiModel})...`)
     const settings = loadSettings()
     const summary = await summarizeTranscript(transcript)
     updateSummaryDone(id, transcript, summary, settings.summaryPrompt)
 
-    const predictions = extractPredictions(summary)
-    if (predictions.length) {
-      insertPredictions(id, title, videoUrl, meta.channel, predictions)
-      console.log(`[predictions] ${predictions.length} extracted from ${title}`)
+    const { author } = extractSummaryMeta(summary)
+    if (author) {
+      updateSummaryAuthor(id, author)
+      console.log(`[author] ${author} for ${title}`)
     }
 
     emitStep(id, title, 'done', 'Fertig!')
@@ -158,18 +161,33 @@ const app = new Elysia()
   // Predictions
   .get('/api/predictions', () => getAllPredictions())
 
-  .post('/api/predictions/backfill', () => {
-    const summaries = getAllSummaries().filter(s => s.status === 'done' && s.summary)
-    let total = 0
-    for (const s of summaries) {
-      deletePredictionsBySummary(s.id)
-      const rows = extractPredictions(s.summary ?? '')
-      if (rows.length) {
-        insertPredictions(s.id, s.videoTitle, s.videoUrl, s.channelName, rows)
-        total += rows.length
-      }
-    }
-    return { ok: true, extracted: total, summaries: summaries.length }
+  .post('/api/predictions', ({ body }) => {
+    const rows = body.predictions.map(p => ({
+      asset: p.name,
+      direction: p.direction,
+      ifCases: p.if_cases,
+      priceTarget: p.price_target,
+    }))
+    insertPredictions(body.summaryId, body.videoTitle, body.videoUrl, body.channelName, body.author, rows)
+    return { ok: true, added: rows.length }
+  }, { body: t.Object({
+    summaryId: t.String(),
+    videoTitle: t.String(),
+    videoUrl: t.String(),
+    channelName: t.String(),
+    author: t.String(),
+    predictions: t.Array(t.Object({
+      name: t.String(),
+      direction: t.String(),
+      if_cases: t.String(),
+      price_target: t.String(),
+    })),
+  }) })
+
+  .delete('/api/predictions/:id', ({ params }) => {
+    const ok = deletePrediction(params.id)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
   })
 
   // Notes CRUD
@@ -188,6 +206,28 @@ const app = new Elysia()
   .delete('/api/notes/:id', ({ params }) => {
     const ok = deleteNote(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
+  })
+
+  // Danger zone: reset tables
+  .delete('/api/reset/summaries', () => {
+    deleteAllPredictions()
+    const deleted = deleteAllSummaries()
+    return { ok: true, deleted }
+  })
+
+  .delete('/api/reset/notes', () => {
+    const deleted = deleteAllNotes()
+    return { ok: true, deleted }
+  })
+
+  .delete('/api/reset/predictions', () => {
+    const deleted = deleteAllPredictions()
+    return { ok: true, deleted }
+  })
+
+  .delete('/api/reset/settings', () => {
+    resetSettings()
     return { ok: true }
   })
 

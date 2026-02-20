@@ -24,7 +24,11 @@ export default function App() {
       <header className="border-b border-slate-200 bg-white sticky top-0 z-20">
         <div className="mx-auto max-w-5xl px-4 flex items-center gap-6 h-14">
           <div className="flex items-center gap-2 mr-4">
-            <span className="text-xl font-bold text-slate-900">ASI</span>
+            <Youtube className="w-6 h-6 text-red-600" />
+            <div className="leading-none">
+              <span className="text-base font-bold text-slate-900 tracking-tight">YouTube</span>
+              <span className="block text-[10px] font-medium text-slate-400 tracking-wide uppercase">Assistent</span>
+            </div>
           </div>
           <nav className="flex gap-1">
             {navItems.map(({ to, label, icon: Icon }) => (

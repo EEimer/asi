@@ -106,29 +106,30 @@ export default function SummariesView() {
               const badge = STATUS_BADGE[s.status] ?? STATUS_BADGE.error
               return (
                 <div key={s.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-slate-300 transition-colors">
-                  <div className="flex gap-4 p-4">
-                    <Link to={`/summaries/${s.id}`} className="shrink-0">
-                      <img src={s.thumbnailUrl} alt="" className="w-40 h-24 object-cover rounded-lg bg-slate-100"
+                  <div className="flex p-4">
+                    <Link to={`/summaries/${s.id}`} className="flex gap-4 flex-1 min-w-0">
+                      <img src={s.thumbnailUrl} alt="" className="w-40 h-24 object-cover rounded-lg bg-slate-100 shrink-0"
                         onError={e => { (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${s.videoId}/hqdefault.jpg` }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start gap-2">
+                          <h3 className="font-semibold text-slate-900 text-sm truncate flex-1 min-w-0">{s.videoTitle || (s.status === 'processing' ? 'Wird verarbeitet...' : 'Ohne Titel')}</h3>
+                          <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {s.channelName}
+                          {s.author && s.author !== s.channelName && <span className="text-slate-400"> · {s.author}</span>}
+                        </p>
+                        {s.status === 'done' && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{s.summary?.slice(0, 200)}...</p>}
+                        {s.status === 'error' && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{s.errorMessage?.slice(0, 100)}</p>}
+                        <div className="flex items-center gap-3 mt-2">
+                          <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                            <Clock className="w-3 h-3" /> {new Date(s.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{s.lang}</span>
+                        </div>
+                      </div>
                     </Link>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start gap-2">
-                        <Link to={`/summaries/${s.id}`} className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-slate-900 text-sm truncate hover:text-primary transition-colors">{s.videoTitle || (s.status === 'processing' ? 'Wird verarbeitet...' : 'Ohne Titel')}</h3>
-                        </Link>
-                        <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{s.channelName}</p>
-                      {s.status === 'done' && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{s.summary?.slice(0, 200)}...</p>}
-                      {s.status === 'error' && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{s.errorMessage?.slice(0, 100)}</p>}
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                          <Clock className="w-3 h-3" /> {new Date(s.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{s.lang}</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1 shrink-0">
+                    <div className="flex flex-col gap-1 shrink-0 ml-4">
                       <a href={s.videoUrl} target="_blank" rel="noopener" className="p-2 text-slate-400 hover:text-primary hover:bg-slate-50 rounded-lg transition-colors" title="YouTube">
                         <ExternalLink className="w-4 h-4" />
                       </a>

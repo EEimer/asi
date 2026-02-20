@@ -25,6 +25,10 @@ export function getSettings(): Partial<Settings> {
   return result as Partial<Settings>
 }
 
+export function resetSettings() {
+  db.query('DELETE FROM settings').run()
+}
+
 export function updateSettings(settings: Partial<Settings>) {
   const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
   for (const [key, value] of Object.entries(settings)) {

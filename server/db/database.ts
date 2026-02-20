@@ -54,13 +54,28 @@ db.exec(`
     video_title  TEXT NOT NULL DEFAULT '',
     video_url    TEXT NOT NULL DEFAULT '',
     channel_name TEXT NOT NULL DEFAULT '',
+    author       TEXT NOT NULL DEFAULT '',
     asset_name   TEXT NOT NULL DEFAULT '',
     direction    TEXT NOT NULL DEFAULT '',
-    target       TEXT NOT NULL DEFAULT '',
+    if_cases     TEXT NOT NULL DEFAULT '',
+    price_target TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (summary_id) REFERENCES summaries(id) ON DELETE CASCADE
   )
 `)
+
+// Migrations for existing databases
+try { db.exec('ALTER TABLE summaries ADD COLUMN author TEXT NOT NULL DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE predictions ADD COLUMN author TEXT NOT NULL DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE predictions ADD COLUMN if_cases TEXT NOT NULL DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE predictions ADD COLUMN price_target TEXT NOT NULL DEFAULT ""') } catch {}
+
+// Migrate old prompt to new format
+const OLD_PROMPT_PREFIX = 'Du bist ein Experte für Zusammenfassungen. Fasse das folgende YouTube-Transkript'
+const currentPrompt = db.query('SELECT value FROM settings WHERE key = ?').get('summary_prompt') as { value: string } | null
+if (currentPrompt?.value?.startsWith(OLD_PROMPT_PREFIX)) {
+  db.query('UPDATE settings SET value = ? WHERE key = ?').run(DEFAULT_SETTINGS.summaryPrompt, 'summary_prompt')
+}
 
 const existingKeys = db.query('SELECT key FROM settings').all() as { key: string }[]
 const existing = new Set(existingKeys.map(r => r.key))

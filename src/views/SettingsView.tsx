@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { fetchSettings, updateSettings } from '../api/endpoints'
+import { fetchSettings, updateSettings, resetTable } from '../api/endpoints'
 import type { Settings } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
-import { Save, RotateCcw, Loader2, Check, Plus, X } from 'lucide-react'
+import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
+import { useToast } from '../store/toastStore'
 
 const LANG_OPTIONS = [
   { value: 'de', label: 'Deutsch' },
@@ -29,12 +30,23 @@ const MODEL_OPTIONS = [
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
 ]
 
+type DangerTarget = 'summaries' | 'notes' | 'predictions' | 'settings' | null
+
+const DANGER_LABELS: Record<string, { title: string; desc: string; confirm: string }> = {
+  summaries: { title: 'Alle Zusammenfassungen löschen', desc: 'Alle Zusammenfassungen und zugehörige Prognosen werden unwiderruflich gelöscht.', confirm: 'Alle löschen' },
+  notes: { title: 'Alle Notizen löschen', desc: 'Alle Notizen werden unwiderruflich gelöscht.', confirm: 'Alle löschen' },
+  predictions: { title: 'Alle Prognosen löschen', desc: 'Alle Glaskugel-Einträge werden unwiderruflich gelöscht.', confirm: 'Alle löschen' },
+  settings: { title: 'Einstellungen zurücksetzen', desc: 'Alle Einstellungen werden auf Standardwerte zurückgesetzt. Prompt, blockierte Kanäle, Modell etc. gehen verloren.', confirm: 'Zurücksetzen' },
+}
+
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
+  const [dangerTarget, setDangerTarget] = useState<DangerTarget>(null)
+  const { addToast } = useToast()
 
   useEffect(() => {
     fetchSettings().then(s => setSettings(s)).catch(console.error).finally(() => setLoading(false))
@@ -67,6 +79,21 @@ export default function SettingsView() {
     const updated = settings.blockedChannels.filter(c => c !== name)
     setSettings(s => ({ ...s, blockedChannels: updated }))
     updateSettings({ blockedChannels: updated }).catch(console.error)
+  }
+
+  async function handleDangerReset() {
+    if (!dangerTarget) return
+    try {
+      await resetTable(dangerTarget)
+      if (dangerTarget === 'settings') {
+        setSettings({ ...DEFAULT_SETTINGS })
+        await updateSettings(DEFAULT_SETTINGS)
+      }
+      addToast(DANGER_LABELS[dangerTarget].title + ' — erfolgreich', 'success', 3000)
+    } catch (e: any) {
+      addToast(`Fehler: ${e.message}`, 'error', 5000)
+    }
+    setDangerTarget(null)
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
@@ -167,6 +194,35 @@ export default function SettingsView() {
             <RotateCcw className="w-4 h-4" /> Zurücksetzen
           </button>
         </div>
+
+        <div className="bg-white border border-danger/30 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 bg-danger/5 border-b border-danger/20">
+            <AlertTriangle className="w-4 h-4 text-danger" />
+            <span className="text-sm font-semibold text-danger">Danger Zone</span>
+          </div>
+          <div className="p-5 space-y-3">
+            {([
+              { key: 'summaries' as const, label: 'Zusammenfassungen', desc: 'Alle Zusammenfassungen + zugehörige Prognosen löschen' },
+              { key: 'predictions' as const, label: 'Glaskugel', desc: 'Alle Prognosen löschen' },
+              { key: 'notes' as const, label: 'Notizen', desc: 'Alle Notizen löschen' },
+              { key: 'settings' as const, label: 'Einstellungen', desc: 'Prompt, Modell, Sprache und blockierte Kanäle zurücksetzen' },
+            ]).map(item => (
+              <div key={item.key} className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{item.label}</p>
+                  <p className="text-xs text-slate-500">{item.desc}</p>
+                </div>
+                <button
+                  onClick={() => setDangerTarget(item.key)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-danger/40 text-danger rounded-lg hover:bg-danger/5 transition-colors shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {item.key === 'settings' ? 'Zurücksetzen' : 'Löschen'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       <ConfirmModal
@@ -178,6 +234,18 @@ export default function SettingsView() {
         confirmLabel="Zurücksetzen"
         variant="warning"
       />
+
+      {dangerTarget && (
+        <ConfirmModal
+          open
+          onClose={() => setDangerTarget(null)}
+          onConfirm={handleDangerReset}
+          title={DANGER_LABELS[dangerTarget].title}
+          description={DANGER_LABELS[dangerTarget].desc}
+          confirmLabel={DANGER_LABELS[dangerTarget].confirm}
+          variant="danger"
+        />
+      )}
     </div>
   )
 }

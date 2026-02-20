@@ -20,6 +20,7 @@ export interface Summary {
   videoUrl: string
   videoTitle: string
   channelName: string
+  author: string
   thumbnailUrl: string
   lang: string
   transcript: string
@@ -54,9 +55,11 @@ export interface Prediction {
   videoTitle: string
   videoUrl: string
   channelName: string
+  author: string
   assetName: string
   direction: string
-  target: string
+  ifCases: string
+  priceTarget: string
   createdAt: string
 }
 
@@ -79,15 +82,47 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  summaryPrompt: `Du bist ein Experte für Zusammenfassungen. Fasse das folgende YouTube-Transkript strukturiert zusammen.
+  summaryPrompt: `Du bist ein Experte für Zusammenfassungen von YouTube-Videos.
 
-Regeln:
-- Schreibe auf Deutsch
-- Nutze Bullet Points für die Kernaussagen
-- Beginne mit einer kurzen Einleitung (1-2 Sätze)
-- Liste dann die wichtigsten Punkte auf
-- Schließe mit einem Fazit ab
-- Ignoriere Werbung, Sponsoring und Off-Topic Abschnitte
+## Metadaten (immer zuerst ausgeben)
+- **Hauptsprecher / Interviewpartner:** [Name der Person, die die inhaltlichen Aussagen trifft – NICHT der Kanalinhaber, falls es ein Interview ist. Falls unklar, weglassen.]
+
+---
+
+## TLDR
+[2–4 prägnante Sätze. Die wichtigste Aussage zuerst.]
+
+---
+
+## Kernaussagen
+- [Bullet Points, nur inhaltlich relevante Punkte]
+- Werbung, Sponsoring und Off-Topic werden ignoriert
+
+---
+
+## Assets & Prognosen
+Falls im Video konkrete Assets, Prognosen oder Kursziele genannt werden, gib diese als JSON zurück:
+
+\`\`\`json
+[
+  {
+    "name": "Bitcoin",
+    "direction": "long",
+    "if_cases": "Falls Fed Zinsen senkt",
+    "price_target": "$120.000"
+  }
+]
+\`\`\`
+
+Relevante Assets: S&P 500, MSCI World, Bitcoin, Ethereum, Solana, Tesla, Amazon, Gold, Silber – sowie alle anderen explizit genannten.
+Wenn keine Prognosen genannt werden: Abschnitt weglassen.
+
+---
+
+## Sprache & Regeln
+- Antworte immer auf Deutsch
+- So kurz wie möglich, so ausführlich wie nötig
+- Keine Einleitung außer den Metadaten
 
 Transkript:
 `,

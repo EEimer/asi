@@ -85,14 +85,35 @@ export async function deleteNoteApi(id: string): Promise<void> {
   if (!res.ok) throw new Error(`Delete note error: ${res.status}`)
 }
 
+export async function addPredictions(payload: {
+  summaryId: string
+  videoTitle: string
+  videoUrl: string
+  channelName: string
+  author: string
+  predictions: { name: string; direction: string; if_cases: string; price_target: string }[]
+}): Promise<{ ok: boolean; added: number }> {
+  const res = await fetch(`${BASE}/predictions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`Add predictions error: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchPredictions(): Promise<Prediction[]> {
   const res = await fetch(`${BASE}/predictions`)
   if (!res.ok) throw new Error(`Predictions error: ${res.status}`)
   return res.json()
 }
 
-export async function backfillPredictions(): Promise<{ extracted: number; summaries: number }> {
-  const res = await fetch(`${BASE}/predictions/backfill`, { method: 'POST' })
-  if (!res.ok) throw new Error(`Backfill error: ${res.status}`)
-  return res.json()
+export async function deletePrediction(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/predictions/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete prediction error: ${res.status}`)
+}
+
+export async function resetTable(table: 'summaries' | 'notes' | 'predictions' | 'settings'): Promise<void> {
+  const res = await fetch(`${BASE}/reset/${table}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Reset error: ${res.status}`)
 }
