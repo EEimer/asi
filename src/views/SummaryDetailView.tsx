@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchSummary, deleteSummary, addPredictions } from '../api/endpoints'
+import { fetchSummary, deleteSummary, addPredictions, updateAuthor } from '../api/endpoints'
 import type { Summary } from '../../shared/types'
-import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Gem, Check } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Gem, Check, Pencil, Save, User } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { useToast } from '../store/toastStore'
@@ -205,6 +205,8 @@ export default function SummaryDetailView() {
   const [loading, setLoading] = useState(true)
   const [showTranscript, setShowTranscript] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [editingAuthor, setEditingAuthor] = useState(false)
+  const [authorDraft, setAuthorDraft] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -317,6 +319,55 @@ export default function SummaryDetailView() {
             </>
           )}
         </div>
+
+        {summary.status === 'done' && (
+          <div className="border-t border-slate-100 px-5 py-4 flex items-center gap-3">
+            <User className="w-4 h-4 text-slate-400 shrink-0" />
+            {editingAuthor ? (
+              <>
+                <input
+                  type="text"
+                  value={authorDraft}
+                  onChange={e => setAuthorDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      updateAuthor(summary.id, authorDraft.trim()).then(() => {
+                        setSummary(prev => prev ? { ...prev, author: authorDraft.trim() } : prev)
+                        setEditingAuthor(false)
+                      })
+                    }
+                  }}
+                  autoFocus
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                  placeholder="Autor / Sprecher eingeben..."
+                />
+                <button
+                  onClick={() => {
+                    updateAuthor(summary.id, authorDraft.trim()).then(() => {
+                      setSummary(prev => prev ? { ...prev, author: authorDraft.trim() } : prev)
+                      setEditingAuthor(false)
+                    })
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-accent rounded-lg hover:bg-accent/90 transition-colors"
+                >
+                  <Save className="w-3.5 h-3.5" /> Speichern
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-sm text-slate-700">
+                  {summary.author || <span className="text-slate-400 italic">Kein Autor hinterlegt</span>}
+                </span>
+                <button
+                  onClick={() => { setAuthorDraft(summary.author ?? ''); setEditingAuthor(true) }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Bearbeiten
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {summary.transcript && (
           <div className="border-t border-slate-100">

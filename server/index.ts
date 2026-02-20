@@ -43,7 +43,9 @@ async function processSummary(id: string, videoUrl: string, lang: string, knownT
 
     emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${loadSettings().openaiModel})...`)
     const settings = loadSettings()
-    const summary = await summarizeTranscript(transcript)
+    const summary = await summarizeTranscript(transcript, (msg) => {
+      emitStep(id, title, 'summarizing', msg)
+    }, { title, channel: meta.channel })
     updateSummaryDone(id, transcript, summary, settings.summaryPrompt)
 
     const { author } = extractSummaryMeta(summary)
@@ -150,6 +152,11 @@ const app = new Elysia()
     if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return summary
   })
+
+  .put('/api/summaries/:id/author', ({ params, body }) => {
+    updateSummaryAuthor(params.id, body.author)
+    return { ok: true }
+  }, { body: t.Object({ author: t.String() }) })
 
   .delete('/api/summaries/:id', ({ params }) => {
     deletePredictionsBySummary(params.id)

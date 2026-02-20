@@ -35,6 +35,15 @@ export async function createSummary(videoUrl: string, meta?: { title?: string; c
   return res.json()
 }
 
+export async function updateAuthor(id: string, author: string): Promise<void> {
+  const res = await fetch(`${BASE}/summaries/${id}/author`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ author }),
+  })
+  if (!res.ok) throw new Error(`Update author error: ${res.status}`)
+}
+
 export async function deleteSummary(id: string): Promise<void> {
   const res = await fetch(`${BASE}/summaries/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Delete error: ${res.status}`)

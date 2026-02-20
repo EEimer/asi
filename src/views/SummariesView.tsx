@@ -13,6 +13,11 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 
 const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag']
 
+function extractTldr(summary: string): string {
+  const match = summary.match(/##\s*TLDR\s*\n([\s\S]*?)(?=\n##\s|\n---|\s*$)/)
+  return match ? match[1].trim() : summary
+}
+
 function formatDateKey(dateStr: string): string {
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return 'Unbekannt'
@@ -119,7 +124,7 @@ export default function SummariesView() {
                           {s.channelName}
                           {s.author && s.author !== s.channelName && <span className="text-slate-400"> · {s.author}</span>}
                         </p>
-                        {s.status === 'done' && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{s.summary?.slice(0, 200)}...</p>}
+                        {s.status === 'done' && s.summary && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{extractTldr(s.summary).slice(0, 200)}</p>}
                         {s.status === 'error' && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{s.errorMessage?.slice(0, 100)}</p>}
                         <div className="flex items-center gap-3 mt-2">
                           <span className="flex items-center gap-1 text-[10px] text-slate-400">
