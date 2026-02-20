@@ -125,7 +125,6 @@ export default function SummariesView() {
                           <span className="flex items-center gap-1 text-[10px] text-slate-400">
                             <Clock className="w-3 h-3" /> {new Date(s.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
                           </span>
-                          <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{s.lang}</span>
                         </div>
                       </div>
                     </Link>
