@@ -50,7 +50,23 @@ function extractJsonAndMarkdown(text: string): { markdown: string; predictions: 
   markdown = stripMetadataSection(markdown)
   markdown = markdown.replace(/##\s*Assets\s*&\s*Prognosen[^\n]*/gi, '')
   markdown = markdown.replace(/Falls im Video konkrete Assets[^\n]*/gi, '')
-  return { markdown, predictions }
+
+  const merged: ParsedPrediction[] = []
+  const byName = new Map<string, ParsedPrediction>()
+  for (const p of predictions) {
+    const key = p.name.toLowerCase()
+    const existing = byName.get(key)
+    if (existing) {
+      if (p.price_target && !existing.price_target.includes(p.price_target)) existing.price_target += ` / ${p.price_target}`
+      if (p.if_cases && !existing.if_cases.includes(p.if_cases)) existing.if_cases += ` / ${p.if_cases}`
+    } else {
+      const copy = { ...p }
+      byName.set(key, copy)
+      merged.push(copy)
+    }
+  }
+
+  return { markdown, predictions: merged }
 }
 
 function directionBadge(d: string) {
