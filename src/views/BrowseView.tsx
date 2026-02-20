@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, fetchSummaries, fetchSettings, updateSettings } from '../api/endpoints'
 import type { YouTubeVideo } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff } from 'lucide-react'
+import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon } from 'lucide-react'
+import { Modal, ModalFooter } from '../components/Modal'
 
 const PAGE_SIZE = 30
 
@@ -17,6 +18,9 @@ export default function BrowseView() {
   const sentinelRef = useRef<HTMLDivElement>(null)
   const videosLenRef = useRef(0)
   videosLenRef.current = videos.length
+  const [linkModalOpen, setLinkModalOpen] = useState(false)
+  const [manualUrl, setManualUrl] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const loadFeed = useCallback(async (reset = true) => {
     if (reset) { setLoading(true); setError('') }
@@ -100,6 +104,40 @@ export default function BrowseView() {
     }
   }
 
+  async function handleManualUrl() {
+    const url = manualUrl.trim()
+    if (!url) return
+    const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
+    if (!match) { alert('Kein gültiger YouTube Link'); return }
+    const videoId = match[1]
+
+    setSubmitting(true)
+    try {
+      await createSummary(url)
+      setProcessing(prev => new Set(prev).add(videoId))
+
+      // Add a placeholder video to the top of the list
+      setVideos(prev => {
+        if (prev.some(v => v.id === videoId)) return prev
+        return [{
+          id: videoId,
+          title: 'Wird geladen...',
+          channel: '',
+          channelUrl: '',
+          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          duration: 0,
+          durationFormatted: '',
+          uploadDate: '',
+          url,
+        }, ...prev]
+      })
+
+      setManualUrl('')
+      setLinkModalOpen(false)
+    } catch (e: any) { alert(`Fehler: ${e.message}`) }
+    finally { setSubmitting(false) }
+  }
+
   async function handleBlock(channel: string) {
     if (!channel) return
     try {
@@ -137,9 +175,14 @@ export default function BrowseView() {
           <h2 className="text-lg font-semibold text-slate-900">Deine YouTube Abos</h2>
           <span className="text-xs text-slate-400">{videos.length} Videos</span>
         </div>
-        <button onClick={handleRefresh} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
-          <RefreshCw className="w-3.5 h-3.5" /> Aktualisieren
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => { setManualUrl(''); setLinkModalOpen(true) }} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors">
+            <LinkIcon className="w-3.5 h-3.5" /> YouTube Link
+          </button>
+          <button onClick={handleRefresh} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors" title="Feed aktualisieren">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3">
@@ -196,6 +239,35 @@ export default function BrowseView() {
       {!hasMore && videos.length > 0 && (
         <p className="text-center text-xs text-slate-400 py-4">Alle {videos.length} Videos geladen</p>
       )}
+
+      <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
+        <p className="text-sm text-slate-500 mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
+        <input
+          type="text"
+          placeholder="https://www.youtube.com/watch?v=..."
+          value={manualUrl}
+          onChange={e => setManualUrl(e.target.value)}
+          autoFocus
+          onKeyDown={e => { if (e.key === 'Enter') handleManualUrl() }}
+          onPaste={e => {
+            const text = e.clipboardData.getData('text').trim()
+            if (text.match(/(?:youtube\.com|youtu\.be)/)) {
+              e.preventDefault()
+              setManualUrl(text)
+            }
+          }}
+          className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/40"
+        />
+        <ModalFooter>
+          <button onClick={() => setLinkModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
+            Abbrechen
+          </button>
+          <button onClick={handleManualUrl} disabled={submitting || !manualUrl.trim()} className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            Zusammenfassen
+          </button>
+        </ModalFooter>
+      </Modal>
     </div>
   )
 }
