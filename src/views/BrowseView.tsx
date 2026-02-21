@@ -149,95 +149,93 @@ export default function BrowseView() {
     } catch (e: any) { alert(`Fehler: ${e.message}`) }
   }
 
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center py-20 text-slate-500">
-      <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
-      <p className="text-sm">YouTube Abo-Feed wird geladen...</p>
-      <p className="text-xs text-slate-400 mt-1">Das kann beim ersten Mal etwas dauern</p>
-    </div>
-  )
-
-  if (error) return (
-    <div className="flex flex-col items-center justify-center py-20">
-      <AlertCircle className="w-10 h-10 text-danger mb-3" />
-      <p className="text-sm text-slate-700 font-medium mb-1">Feed konnte nicht geladen werden</p>
-      <p className="text-xs text-slate-500 mb-4 max-w-md text-center">{error}</p>
-      <button onClick={() => loadFeed(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-        <RefreshCw className="w-3.5 h-3.5" /> Erneut versuchen
-      </button>
-    </div>
-  )
-
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-slate-900">Deine YouTube Abos</h2>
-          <span className="text-xs text-slate-400">{videos.length} Videos</span>
+          {!loading && <span className="text-xs text-slate-400">{videos.length} Videos</span>}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { setManualUrl(''); setLinkModalOpen(true) }} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors">
             <LinkIcon className="w-3.5 h-3.5" /> YouTube Link
           </button>
-          <button onClick={handleRefresh} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors" title="Feed aktualisieren">
-            <RefreshCw className="w-3.5 h-3.5" />
+          <button onClick={handleRefresh} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-40" title="Feed aktualisieren">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
-      <div className="grid gap-3">
-        {videos.map(v => {
-          const isProcessing = processing.has(v.id)
-          const summaryId = summarized.get(v.id)
-          return (
-            <div key={v.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-slate-300 transition-colors">
-              <div className="flex gap-4 p-4">
-                <div className="relative shrink-0">
-                  <img src={v.thumbnail} alt="" className="w-44 h-[100px] object-cover rounded-lg bg-slate-100" />
-                  {v.durationFormatted && <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded">{v.durationFormatted}</span>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2">{v.title}</h3>
-                  <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                    {v.channel}
-                    {v.channel && <button onClick={() => handleBlock(v.channel)} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
-                  </p>
-                  {v.uploadDate && <p className="text-xs text-slate-400 mt-0.5">{v.uploadDate}</p>}
-                </div>
-                <div className="shrink-0 flex flex-col gap-1.5 items-stretch">
-                  {summaryId ? (
-                    <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/30 rounded-lg hover:bg-success/20 transition-colors">
-                      Zusammengefasst <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
-                  ) : isProcessing ? (
-                    <span className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 border border-primary/30 rounded-lg animate-pulse-slow">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verarbeite...
-                    </span>
-                  ) : (
-                    <button onClick={() => handleSummarize(v)} className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-                      <Sparkles className="w-3.5 h-3.5" /> Zusammenfassen
-                    </button>
-                  )}
-                  <a href={v.url} target="_blank" rel="noopener" className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-accent bg-accent/10 border border-accent/30 rounded-lg hover:bg-accent/20 transition-colors">
-                    <ExternalLink className="w-3.5 h-3.5" /> In YT öffnen
-                  </a>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Infinite scroll sentinel */}
-      <div ref={sentinelRef} className="h-1" />
-      {loadingMore && (
-        <div className="flex items-center justify-center py-6">
-          <Loader2 className="w-5 h-5 animate-spin text-primary mr-2" />
-          <span className="text-sm text-slate-500">Mehr Videos laden...</span>
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-16 text-slate-500">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm">YouTube Abo-Feed wird geladen...</p>
+          <p className="text-xs text-slate-400 mt-1">Das kann beim ersten Mal etwas dauern</p>
         </div>
-      )}
-      {!hasMore && videos.length > 0 && (
-        <p className="text-center text-xs text-slate-400 py-4">Alle {videos.length} Videos geladen</p>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center py-16">
+          <AlertCircle className="w-10 h-10 text-danger mb-3" />
+          <p className="text-sm text-slate-700 font-medium mb-1">Feed konnte nicht geladen werden</p>
+          <p className="text-xs text-slate-500 mb-4 max-w-md text-center">{error}</p>
+          <button onClick={() => loadFeed(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+            <RefreshCw className="w-3.5 h-3.5" /> Erneut versuchen
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-3">
+            {videos.map(v => {
+              const isProcessing = processing.has(v.id)
+              const summaryId = summarized.get(v.id)
+              return (
+                <div key={v.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-slate-300 transition-colors">
+                  <div className="flex gap-4 p-4">
+                    <div className="relative shrink-0">
+                      <img src={v.thumbnail} alt="" className="w-44 h-[100px] object-cover rounded-lg bg-slate-100" />
+                      {v.durationFormatted && <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded">{v.durationFormatted}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2">{v.title}</h3>
+                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                        {v.channel}
+                        {v.channel && <button onClick={() => handleBlock(v.channel)} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
+                      </p>
+                      {v.uploadDate && <p className="text-xs text-slate-400 mt-0.5">{v.uploadDate}</p>}
+                    </div>
+                    <div className="shrink-0 flex flex-col gap-1.5 items-stretch">
+                      {summaryId ? (
+                        <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/30 rounded-lg hover:bg-success/20 transition-colors">
+                          Zusammengefasst <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+                      ) : isProcessing ? (
+                        <span className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 border border-primary/30 rounded-lg animate-pulse-slow">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verarbeite...
+                        </span>
+                      ) : (
+                        <button onClick={() => handleSummarize(v)} className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                          <Sparkles className="w-3.5 h-3.5" /> Zusammenfassen
+                        </button>
+                      )}
+                      <a href={v.url} target="_blank" rel="noopener" className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-accent bg-accent/10 border border-accent/30 rounded-lg hover:bg-accent/20 transition-colors">
+                        <ExternalLink className="w-3.5 h-3.5" /> In YT öffnen
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div ref={sentinelRef} className="h-1" />
+          {loadingMore && (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-5 h-5 animate-spin text-primary mr-2" />
+              <span className="text-sm text-slate-500">Mehr Videos laden...</span>
+            </div>
+          )}
+          {!hasMore && videos.length > 0 && (
+            <p className="text-center text-xs text-slate-400 py-4">Alle {videos.length} Videos geladen</p>
+          )}
+        </>
       )}
 
       <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
