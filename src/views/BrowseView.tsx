@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, fetchSummaries, fetchSettings, updateSettings } from '../api/endpoints'
 import type { YouTubeVideo } from '../../shared/types'
 import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon } from 'lucide-react'
@@ -8,12 +8,13 @@ import { Modal, ModalFooter } from '../components/Modal'
 const PAGE_SIZE = 30
 
 export default function BrowseView() {
+  const navigate = useNavigate()
   const [videos, setVideos] = useState<YouTubeVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState('')
-  const [processing, setProcessing] = useState<Set<string>>(new Set())
+  const [processing, setProcessing] = useState<Map<string, string>>(new Map())
   const [summarized, setSummarized] = useState<Map<string, string>>(new Map())
   const sentinelRef = useRef<HTMLDivElement>(null)
   const videosLenRef = useRef(0)
@@ -80,8 +81,8 @@ export default function BrowseView() {
           if (s.status === 'error') errorVideoIds.add(s.videoId)
         }
         setProcessing(prev => {
-          const next = new Set(prev)
-          for (const id of prev) if (doneMap.has(id) || errorVideoIds.has(id)) next.delete(id)
+          const next = new Map(prev)
+          for (const id of prev.keys()) if (doneMap.has(id) || errorVideoIds.has(id)) next.delete(id)
           return next
         })
         setSummarized(prev => {
@@ -95,11 +96,10 @@ export default function BrowseView() {
   }, [processing.size])
 
   async function handleSummarize(video: YouTubeVideo) {
-    setProcessing(prev => new Set(prev).add(video.id))
     try {
-      await createSummary(video.url, { title: video.title, channel: video.channel, thumbnail: video.thumbnail })
+      const result = await createSummary(video.url, { title: video.title, channel: video.channel, thumbnail: video.thumbnail })
+      setProcessing(prev => new Map(prev).set(video.id, result.id))
     } catch (e: any) {
-      setProcessing(prev => { const n = new Set(prev); n.delete(video.id); return n })
       alert(`Fehler: ${e.message}`)
     }
   }
@@ -113,8 +113,8 @@ export default function BrowseView() {
 
     setSubmitting(true)
     try {
-      await createSummary(url)
-      setProcessing(prev => new Set(prev).add(videoId))
+      const result = await createSummary(url)
+      setProcessing(prev => new Map(prev).set(videoId, result.id))
 
       // Add a placeholder video to the top of the list
       setVideos(prev => {
@@ -186,9 +186,14 @@ export default function BrowseView() {
           <div className="grid gap-3">
             {videos.map(v => {
               const isProcessing = processing.has(v.id)
-              const summaryId = summarized.get(v.id)
+              const summaryId = summarized.get(v.id) ?? processing.get(v.id)
+              const cardClickable = !!(summaryId || isProcessing)
               return (
-                <div key={v.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-slate-300 transition-colors">
+                <div
+                  key={v.id}
+                  onClick={cardClickable && summaryId ? () => navigate(`/summaries/${summaryId}`) : undefined}
+                  className={`bg-white border border-slate-200 rounded-xl overflow-hidden transition-colors ${cardClickable ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : 'hover:border-slate-300'}`}
+                >
                   <div className="flex gap-4 p-4">
                     <div className="relative shrink-0">
                       <img src={v.thumbnail} alt="" className="w-44 h-[100px] object-cover rounded-lg bg-slate-100" />
@@ -198,12 +203,12 @@ export default function BrowseView() {
                       <h3 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2">{v.title}</h3>
                       <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
                         {v.channel}
-                        {v.channel && <button onClick={() => handleBlock(v.channel)} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
+                        {v.channel && <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
                       </p>
                       {v.uploadDate && <p className="text-xs text-slate-400 mt-0.5">{v.uploadDate}</p>}
                     </div>
-                    <div className="shrink-0 flex flex-col gap-1.5 items-stretch">
-                      {summaryId ? (
+                    <div className="shrink-0 flex flex-col gap-1.5 items-stretch" onClick={e => e.stopPropagation()}>
+                      {summaryId && !isProcessing ? (
                         <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/30 rounded-lg hover:bg-success/20 transition-colors">
                           Zusammengefasst <ExternalLink className="w-3.5 h-3.5" />
                         </Link>

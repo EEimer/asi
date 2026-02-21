@@ -103,7 +103,7 @@ export default function GlaskugelView() {
                         </td>
                         <td className="px-4 py-2.5 text-slate-600">{p.priceTarget}</td>
                         <td className="px-4 py-2.5 text-slate-500 text-xs max-w-xs">{p.ifCases}</td>
-                        <td className="px-4 py-2.5 text-slate-500 text-xs">{p.author || p.channelName}</td>
+                        <td className="px-4 py-2.5 text-slate-500 text-xs">{(!p.author || /^(nicht angegeben|unbekannt|unknown|n\/a|-|–)$/i.test(p.author.trim())) ? p.channelName : p.author}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
                             <Link to={`/summaries/${p.summaryId}`} className="text-xs text-primary hover:underline truncate max-w-[150px]" title={p.videoTitle}>

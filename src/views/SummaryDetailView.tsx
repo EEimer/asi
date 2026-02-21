@@ -256,7 +256,7 @@ export default function SummaryDetailView() {
               <h1 className="text-xl font-bold text-white">{summary.videoTitle || 'Wird verarbeitet...'}</h1>
               <p className="text-white/80 text-sm mt-1">
                 {summary.channelName}
-                {summary.author && summary.author !== summary.channelName && <span className="text-white/60"> · {summary.author}</span>}
+                {summary.author && !/^(nicht angegeben|unbekannt|unknown|n\/a|-|–)$/i.test(summary.author.trim()) && summary.author !== summary.channelName && <span className="text-white/60"> · {summary.author}</span>}
               </p>
             </div>
           </div>
