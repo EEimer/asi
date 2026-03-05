@@ -35,6 +35,12 @@ export async function createSummary(videoUrl: string, meta?: { title?: string; c
   return res.json()
 }
 
+export async function retrySummary(id: string): Promise<{ ok: boolean; id: string; status: string }> {
+  const res = await fetch(`${BASE}/summaries/${id}/retry`, { method: 'POST' })
+  if (!res.ok) throw new Error(`Retry error: ${res.status}`)
+  return res.json()
+}
+
 export async function updateAuthor(id: string, author: string): Promise<void> {
   const res = await fetch(`${BASE}/summaries/${id}/author`, {
     method: 'PUT',
@@ -70,23 +76,28 @@ export async function fetchNotes(): Promise<Note[]> {
   return res.json()
 }
 
-export async function createNoteApi(title: string, text: string): Promise<Note> {
+export async function createNoteApi(title: string, text: string, isTodo: boolean): Promise<Note> {
   const res = await fetch(`${BASE}/notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, text }),
+    body: JSON.stringify({ title, text, isTodo }),
   })
   if (!res.ok) throw new Error(`Create note error: ${res.status}`)
   return res.json()
 }
 
-export async function updateNoteApi(id: string, title: string, text: string): Promise<void> {
+export async function updateNoteApi(id: string, title: string, text: string, isTodo: boolean): Promise<void> {
   const res = await fetch(`${BASE}/notes/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, text }),
+    body: JSON.stringify({ title, text, isTodo }),
   })
   if (!res.ok) throw new Error(`Update note error: ${res.status}`)
+}
+
+export async function markNoteDoneApi(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/notes/${id}/done`, { method: 'PUT' })
+  if (!res.ok) throw new Error(`Done note error: ${res.status}`)
 }
 
 export async function deleteNoteApi(id: string): Promise<void> {

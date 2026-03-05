@@ -45,6 +45,8 @@ export interface Note {
   id: string
   title: string
   text: string
+  isTodo: boolean
+  isDone: boolean
   createdAt: string
   updatedAt: string
 }

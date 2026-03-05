@@ -42,6 +42,8 @@ db.exec(`
     id         TEXT PRIMARY KEY,
     title      TEXT NOT NULL DEFAULT '',
     text       TEXT NOT NULL DEFAULT '',
+    is_todo    INTEGER NOT NULL DEFAULT 1,
+    is_done    INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )
@@ -69,6 +71,8 @@ try { db.exec('ALTER TABLE summaries ADD COLUMN author TEXT NOT NULL DEFAULT ""'
 try { db.exec('ALTER TABLE predictions ADD COLUMN author TEXT NOT NULL DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE predictions ADD COLUMN if_cases TEXT NOT NULL DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE predictions ADD COLUMN price_target TEXT NOT NULL DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE notes ADD COLUMN is_todo INTEGER NOT NULL DEFAULT 1') } catch {}
+try { db.exec('ALTER TABLE notes ADD COLUMN is_done INTEGER NOT NULL DEFAULT 0') } catch {}
 
 // Migrate old prompt to new format
 const OLD_PROMPT_PREFIX = 'Du bist ein Experte für Zusammenfassungen. Fasse das folgende YouTube-Transkript'

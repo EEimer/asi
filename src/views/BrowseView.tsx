@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, fetchSummaries, fetchSettings, updateSettings } from '../api/endpoints'
+import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings } from '../api/endpoints'
 import type { YouTubeVideo } from '../../shared/types'
 import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
@@ -16,12 +16,27 @@ export default function BrowseView() {
   const [error, setError] = useState('')
   const [processing, setProcessing] = useState<Map<string, string>>(new Map())
   const [summarized, setSummarized] = useState<Map<string, string>>(new Map())
+  const [failed, setFailed] = useState<Map<string, string>>(new Map())
   const sentinelRef = useRef<HTMLDivElement>(null)
   const videosLenRef = useRef(0)
   videosLenRef.current = videos.length
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [manualUrl, setManualUrl] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  async function refreshSummaryStatusMaps() {
+    try {
+      const all = await fetchSummaries()
+      const doneMap = new Map<string, string>()
+      const errMap = new Map<string, string>()
+      for (const s of all) {
+        if (s.status === 'done') doneMap.set(s.videoId, s.id)
+        else if (s.status === 'error') errMap.set(s.videoId, s.id)
+      }
+      setSummarized(doneMap)
+      setFailed(errMap)
+    } catch {}
+  }
 
   const loadFeed = useCallback(async (reset = true) => {
     if (reset) { setLoading(true); setError('') }
@@ -55,6 +70,7 @@ export default function BrowseView() {
   }
 
   useEffect(() => { loadFeed(true) }, [])
+  useEffect(() => { refreshSummaryStatusMaps() }, [])
 
   // Infinite scroll via IntersectionObserver
   useEffect(() => {
@@ -75,14 +91,14 @@ export default function BrowseView() {
       try {
         const summaries = await fetchSummaries()
         const doneMap = new Map<string, string>()
-        const errorVideoIds = new Set<string>()
+        const errorMap = new Map<string, string>()
         for (const s of summaries) {
           if (s.status === 'done') doneMap.set(s.videoId, s.id)
-          if (s.status === 'error') errorVideoIds.add(s.videoId)
+          if (s.status === 'error') errorMap.set(s.videoId, s.id)
         }
         setProcessing(prev => {
           const next = new Map(prev)
-          for (const id of prev.keys()) if (doneMap.has(id) || errorVideoIds.has(id)) next.delete(id)
+          for (const id of prev.keys()) if (doneMap.has(id) || errorMap.has(id)) next.delete(id)
           return next
         })
         setSummarized(prev => {
@@ -90,6 +106,7 @@ export default function BrowseView() {
           for (const [videoId, summaryId] of doneMap) next.set(videoId, summaryId)
           return next
         })
+        setFailed(errorMap)
       } catch {}
     }, 3000)
     return () => clearInterval(interval)
@@ -99,6 +116,25 @@ export default function BrowseView() {
     try {
       const result = await createSummary(video.url, { title: video.title, channel: video.channel, thumbnail: video.thumbnail })
       setProcessing(prev => new Map(prev).set(video.id, result.id))
+      setFailed(prev => {
+        const next = new Map(prev)
+        next.delete(video.id)
+        return next
+      })
+    } catch (e: any) {
+      alert(`Fehler: ${e.message}`)
+    }
+  }
+
+  async function handleRetry(videoId: string, summaryId: string) {
+    try {
+      await retrySummary(summaryId)
+      setProcessing(prev => new Map(prev).set(videoId, summaryId))
+      setFailed(prev => {
+        const next = new Map(prev)
+        next.delete(videoId)
+        return next
+      })
     } catch (e: any) {
       alert(`Fehler: ${e.message}`)
     }
@@ -186,8 +222,12 @@ export default function BrowseView() {
           <div className="grid gap-3">
             {videos.map(v => {
               const isProcessing = processing.has(v.id)
-              const summaryId = summarized.get(v.id) ?? processing.get(v.id)
-              const cardClickable = !!(summaryId || isProcessing)
+              const doneId = summarized.get(v.id)
+              const processingId = processing.get(v.id)
+              const failedId = failed.get(v.id)
+              const summaryId = doneId ?? processingId ?? failedId
+              const isFailed = !doneId && !processingId && !!failedId
+              const cardClickable = !!summaryId
               return (
                 <div
                   key={v.id}
@@ -209,9 +249,20 @@ export default function BrowseView() {
                     </div>
                     <div className="shrink-0 flex flex-col gap-1.5 items-stretch" onClick={e => e.stopPropagation()}>
                       {summaryId && !isProcessing ? (
-                        <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/30 rounded-lg hover:bg-success/20 transition-colors">
-                          Zusammengefasst <ExternalLink className="w-3.5 h-3.5" />
-                        </Link>
+                        isFailed ? (
+                          <>
+                            <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-danger bg-danger/10 border border-danger/30 rounded-lg hover:bg-danger/20 transition-colors">
+                              Fehlgeschlagen <ExternalLink className="w-3.5 h-3.5" />
+                            </Link>
+                            <button onClick={() => failedId && handleRetry(v.id, failedId)} className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                              <Sparkles className="w-3.5 h-3.5" /> Retry
+                            </button>
+                          </>
+                        ) : (
+                          <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/30 rounded-lg hover:bg-success/20 transition-colors">
+                            Zusammengefasst <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
+                        )
                       ) : isProcessing ? (
                         <span className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 border border-primary/30 rounded-lg animate-pulse-slow">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verarbeite...

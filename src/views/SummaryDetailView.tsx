@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { fetchSummary, deleteSummary, addPredictions, updateAuthor } from '../api/endpoints'
 import type { Summary } from '../../shared/types'
-import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Gem, Check, Pencil, Save, User } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { useToast } from '../store/toastStore'
@@ -88,42 +88,55 @@ interface PredictionsTableProps {
 }
 
 function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channelName, author }: PredictionsTableProps) {
-  const [checked, setChecked] = useState<Set<number>>(() => new Set(predictions.map((_, i) => i)))
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [items, setItems] = useState<ParsedPrediction[]>(predictions)
+  const [addingRow, setAddingRow] = useState<number | null>(null)
+  const [directAdding, setDirectAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newDirection, setNewDirection] = useState('neutral')
+  const [newTarget, setNewTarget] = useState('')
+  const [newIfCases, setNewIfCases] = useState('')
   const { addToast } = useToast()
 
-  if (!predictions.length) return null
-
-  const allChecked = checked.size === predictions.length
-  const noneChecked = checked.size === 0
-
-  function toggleAll() {
-    if (allChecked) setChecked(new Set())
-    else setChecked(new Set(predictions.map((_, i) => i)))
-  }
-
-  function toggle(idx: number) {
-    setChecked(prev => {
-      const next = new Set(prev)
-      if (next.has(idx)) next.delete(idx)
-      else next.add(idx)
-      return next
-    })
-  }
-
-  async function handleAdd() {
-    const selected = predictions.filter((_, i) => checked.has(i))
-    if (!selected.length) return
-    setSaving(true)
+  async function handleAddRow(item: ParsedPrediction, idx: number) {
+    setAddingRow(idx)
     try {
-      await addPredictions({ summaryId, videoTitle, videoUrl, channelName, author, predictions: selected })
-      addToast(`${selected.length} Prognose${selected.length > 1 ? 'n' : ''} zur Glaskugel hinzugefügt`, 'success', 3000)
-      setSaved(true)
+      await addPredictions({ summaryId, videoTitle, videoUrl, channelName, author, predictions: [item] })
+      addToast('Prognose zur Glaskugel hinzugefügt', 'success', 2200)
     } catch (e: any) {
       addToast(`Fehler: ${e.message}`, 'error', 5000)
     } finally {
-      setSaving(false)
+      setAddingRow(null)
+    }
+  }
+
+  async function handleAddCustomRow() {
+    const name = newName.trim()
+    const ifCases = newIfCases.trim()
+    const priceTarget = newTarget.trim()
+    if (!name) {
+      addToast('Asset ist erforderlich', 'error', 2500)
+      return
+    }
+    setDirectAdding(true)
+    try {
+      await addPredictions({
+        summaryId,
+        videoTitle,
+        videoUrl,
+        channelName,
+        author,
+        predictions: [{ name, direction: newDirection, if_cases: ifCases, price_target: priceTarget }],
+      })
+      setNewName('')
+      setNewDirection('neutral')
+      setNewTarget('')
+      setNewIfCases('')
+      setItems(prev => [...prev, { name, direction: newDirection, if_cases: ifCases, price_target: priceTarget }])
+      addToast('Eintrag direkt hinzugefügt', 'success', 2200)
+    } catch (e: any) {
+      addToast(`Fehler: ${e.message}`, 'error', 5000)
+    } finally {
+      setDirectAdding(false)
     }
   }
 
@@ -131,20 +144,6 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
     <div className="my-4">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-base font-semibold text-slate-900">Assets & Prognosen</h3>
-        {saved ? (
-          <span className="flex items-center gap-1.5 text-xs font-medium text-success">
-            <Check className="w-3.5 h-3.5" /> Hinzugefügt
-          </span>
-        ) : (
-          <button
-            onClick={handleAdd}
-            disabled={noneChecked || saving}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-40"
-          >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gem className="w-3.5 h-3.5" />}
-            Zu Glaskugel hinzufügen{!noneChecked && ` (${checked.size})`}
-          </button>
-        )}
       </div>
       <div className="border border-slate-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
@@ -154,23 +153,14 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
               <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500">Richtung</th>
               <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500">Kursziel</th>
               <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500">Bedingung</th>
-              <th className="w-10 px-3 py-2 text-center">
-                <input
-                  type="checkbox"
-                  checked={allChecked}
-                  onChange={toggleAll}
-                  disabled={saved}
-                  title="Alle auswählen"
-                  className="w-3.5 h-3.5 rounded border-slate-300 text-accent focus:ring-accent/40 cursor-pointer disabled:opacity-40"
-                />
-              </th>
+              <th className="w-24 px-3 py-2 text-center">Add</th>
             </tr>
           </thead>
           <tbody>
-            {predictions.map((p, i) => {
+            {items.map((p, i) => {
               const { cls, Icon } = directionBadge(p.direction)
               return (
-                <tr key={i} className={`border-t border-slate-100 ${!checked.has(i) && !saved ? 'opacity-40' : ''} transition-opacity`}>
+                <tr key={i} className="border-t border-slate-100 transition-colors">
                   <td className="px-4 py-2.5 font-medium text-slate-900">{p.name}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${cls}`}>
@@ -179,18 +169,71 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
                   </td>
                   <td className="px-4 py-2.5 text-slate-600">{p.price_target}</td>
                   <td className="px-4 py-2.5 text-sm text-slate-700">{p.if_cases}</td>
-                  <td className="w-10 px-3 py-2.5 text-center">
-                    <input
-                      type="checkbox"
-                      checked={checked.has(i)}
-                      onChange={() => toggle(i)}
-                      disabled={saved}
-                      className="w-3.5 h-3.5 rounded border-slate-300 text-accent focus:ring-accent/40 cursor-pointer disabled:opacity-40"
-                    />
+                  <td className="w-24 px-3 py-2.5 text-center">
+                    <button
+                      onClick={() => handleAddRow(p, i)}
+                      disabled={addingRow === i}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-accent border border-accent/30 bg-accent/10 rounded-md hover:bg-accent/20 transition-colors disabled:opacity-40"
+                    >
+                      {addingRow === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} Add
+                    </button>
                   </td>
                 </tr>
               )
             })}
+            <tr className="border-t border-slate-200 bg-slate-50/40">
+              <td className="px-4 py-2.5">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="Asset"
+                  disabled={directAdding}
+                  className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+                />
+              </td>
+              <td className="px-4 py-2.5">
+                <select
+                  value={newDirection}
+                  onChange={e => setNewDirection(e.target.value)}
+                  disabled={directAdding}
+                  className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+                >
+                  <option value="long">long</option>
+                  <option value="short">short</option>
+                  <option value="neutral">neutral</option>
+                </select>
+              </td>
+              <td className="px-4 py-2.5">
+                <input
+                  type="text"
+                  value={newTarget}
+                  onChange={e => setNewTarget(e.target.value)}
+                  placeholder="Kursziel"
+                  disabled={directAdding}
+                  className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+                />
+              </td>
+              <td className="px-4 py-2.5">
+                <input
+                  type="text"
+                  value={newIfCases}
+                  onChange={e => setNewIfCases(e.target.value)}
+                  placeholder="Bedingung"
+                  disabled={directAdding}
+                  className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+                />
+              </td>
+              <td className="w-24 px-3 py-2.5 text-center">
+                <button
+                  onClick={handleAddCustomRow}
+                  disabled={directAdding}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-accent border border-accent/30 bg-accent/10 rounded-md hover:bg-accent/20 transition-colors disabled:opacity-40"
+                >
+                  {directAdding ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} ADD
+                </button>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -306,7 +349,7 @@ export default function SummaryDetailView() {
                   )}
                 </div>
               ))}
-              {htmlParts.length <= 1 && predictions.length > 0 && (
+              {htmlParts.length <= 1 && (
                 <PredictionsTable
                   predictions={predictions}
                   summaryId={summary.id}

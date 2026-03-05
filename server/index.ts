@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
-import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
-import { getAllNotes, createNote, updateNote, deleteNote, deleteAllNotes } from './db/notes'
+import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
+import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
 import { getAllPredictions, insertPredictions, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
 import { extractSummaryMeta } from './services/tableParser'
 import { getSettings, updateSettings, resetSettings } from './db/settings'
@@ -158,6 +158,16 @@ const app = new Elysia()
     return { ok: true }
   }, { body: t.Object({ author: t.String() }) })
 
+  .post('/api/summaries/:id/retry', ({ params }) => {
+    const summary = getSummaryById(params.id)
+    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    const ok = resetSummaryForRetry(params.id)
+    if (!ok) return new Response(JSON.stringify({ error: 'Retry failed' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
+    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.videoTitle || '')
+    return { ok: true, id: summary.id, status: 'processing' }
+  })
+
   .delete('/api/summaries/:id', ({ params }) => {
     deletePredictionsBySummary(params.id)
     const ok = deleteSummary(params.id)
@@ -201,14 +211,20 @@ const app = new Elysia()
   .get('/api/notes', () => getAllNotes())
 
   .post('/api/notes', ({ body }) => {
-    return createNote(body.title, body.text)
-  }, { body: t.Object({ title: t.String(), text: t.String() }) })
+    return createNote(body.title ?? '', body.text ?? '', body.isTodo ?? true)
+  }, { body: t.Object({ title: t.Optional(t.String()), text: t.Optional(t.String()), isTodo: t.Optional(t.Boolean()) }) })
 
   .put('/api/notes/:id', ({ params, body }) => {
-    const ok = updateNote(params.id, body.title, body.text)
+    const ok = updateNote(params.id, body.title ?? '', body.text ?? '', body.isTodo ?? true)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return { ok: true }
-  }, { body: t.Object({ title: t.String(), text: t.String() }) })
+  }, { body: t.Object({ title: t.Optional(t.String()), text: t.Optional(t.String()), isTodo: t.Optional(t.Boolean()) }) })
+
+  .put('/api/notes/:id/done', ({ params }) => {
+    const ok = markNoteDone(params.id)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
+  })
 
   .delete('/api/notes/:id', ({ params }) => {
     const ok = deleteNote(params.id)

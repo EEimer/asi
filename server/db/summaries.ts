@@ -44,6 +44,13 @@ export function updateSummaryError(id: string, errorMessage: string) {
   db.query('UPDATE summaries SET error_message = ?, status = ? WHERE id = ?').run(errorMessage, 'error', id)
 }
 
+export function resetSummaryForRetry(id: string): boolean {
+  const result = db.query(
+    'UPDATE summaries SET status = ?, error_message = NULL, transcript = NULL, summary = NULL, custom_prompt = NULL WHERE id = ?',
+  ).run('processing', id)
+  return result.changes > 0
+}
+
 export function deleteSummary(id: string): boolean {
   const result = db.query('DELETE FROM summaries WHERE id = ?').run(id)
   return result.changes > 0

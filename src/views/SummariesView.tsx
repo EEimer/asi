@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchSummaries, deleteSummary } from '../api/endpoints'
+import { fetchSummaries, deleteSummary, retrySummary } from '../api/endpoints'
 import type { SummaryListItem } from '../../shared/types'
-import { Clock, Trash2, ExternalLink, Loader2, FileText, AlertCircle } from 'lucide-react'
+import { Clock, Trash2, ExternalLink, Loader2, FileText, AlertCircle, RotateCcw } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 
 const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
@@ -45,6 +45,7 @@ export default function SummariesView() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
 
   useEffect(() => { loadSummaries() }, [])
 
@@ -64,6 +65,27 @@ export default function SummariesView() {
     await deleteSummary(id)
     setSummaries(prev => prev.filter(s => s.id !== id))
     setDeleteTarget(null)
+  }
+
+  async function handleRetry(s: SummaryListItem) {
+    setRetryingId(s.id)
+    setSummaries(prev => prev.map(item =>
+      item.id === s.id
+        ? { ...item, status: 'processing', errorMessage: '' }
+        : item,
+    ))
+    try {
+      await retrySummary(s.id)
+    } catch (e) {
+      console.error(e)
+      setSummaries(prev => prev.map(item =>
+        item.id === s.id
+          ? { ...item, status: 'error' }
+          : item,
+      ))
+    } finally {
+      setRetryingId(null)
+    }
   }
 
   const filtered = summaries.filter(s => {
@@ -118,7 +140,10 @@ export default function SummariesView() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start gap-2">
                           <h3 className="font-semibold text-slate-900 text-sm truncate flex-1 min-w-0">{s.videoTitle || (s.status === 'processing' ? 'Wird verarbeitet...' : 'Ohne Titel')}</h3>
-                          <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
+                          <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${badge.cls}`}>
+                            {s.status === 'processing' && <Loader2 className="w-3 h-3 animate-spin" />}
+                            {badge.label}
+                          </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {s.channelName}
@@ -134,6 +159,16 @@ export default function SummariesView() {
                       </div>
                     </Link>
                     <div className="flex flex-col gap-1 shrink-0 ml-4">
+                      {s.status === 'error' && (
+                        <button
+                          onClick={() => handleRetry(s)}
+                          disabled={retryingId === s.id}
+                          className="p-2 text-slate-400 hover:text-primary hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="Retry"
+                        >
+                          {retryingId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                        </button>
+                      )}
                       <a href={s.videoUrl} target="_blank" rel="noopener" className="p-2 text-slate-400 hover:text-primary hover:bg-slate-50 rounded-lg transition-colors" title="YouTube">
                         <ExternalLink className="w-4 h-4" />
                       </a>
