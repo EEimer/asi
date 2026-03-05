@@ -132,18 +132,24 @@ export async function downloadSubtitles(videoUrl: string, lang: string): Promise
     const tmpDir = `/tmp/asi_subs_${Date.now()}_${tryLang}`
     mkdirSync(tmpDir, { recursive: true })
 
-    for (const flag of ['--write-auto-sub', '--write-sub']) {
-      const proc = Bun.spawn(
-        ['yt-dlp', flag, '--sub-lang', tryLang, '--skip-download', '--sub-format', 'srt', ...cookieArgs(), '-o', `${tmpDir}/%(id)s.%(ext)s`, videoUrl],
-        { stdout: 'pipe', stderr: 'pipe' },
-      )
-      await proc.exited
+    const cookieStrategies: string[][] = [cookieArgs(), []]
 
-      const files = readdirSync(tmpDir).filter(f => f.endsWith('.srt'))
-      if (files.length) {
-        const srtContent = readFileSync(join(tmpDir, files[0]), 'utf-8')
-        rmSync(tmpDir, { recursive: true, force: true })
-        return { text: srtToText(srtContent), usedLang: tryLang }
+    for (const extraArgs of cookieStrategies) {
+      for (const flag of ['--write-auto-sub', '--write-sub']) {
+        const proc = Bun.spawn(
+          ['yt-dlp', flag, '--sub-lang', tryLang, '--skip-download', '--sub-format', 'srt/vtt', ...extraArgs, '-o', `${tmpDir}/%(id)s.%(ext)s`, videoUrl],
+          { stdout: 'pipe', stderr: 'pipe' },
+        )
+        await proc.exited
+
+        const files = readdirSync(tmpDir).filter(f =>
+          f.endsWith('.srt') || f.endsWith('.vtt') || f.endsWith('.json3'),
+        )
+        if (files.length) {
+          const rawContent = readFileSync(join(tmpDir, files[0]), 'utf-8')
+          rmSync(tmpDir, { recursive: true, force: true })
+          return { text: subtitlesToText(rawContent), usedLang: tryLang }
+        }
       }
     }
 
@@ -153,12 +159,13 @@ export async function downloadSubtitles(videoUrl: string, lang: string): Promise
   throw new Error(`No subtitles found (tried: ${langs.join(', ')})`)
 }
 
-function srtToText(srt: string): string {
+function subtitlesToText(srt: string): string {
   const seen = new Set<string>()
   const lines: string[] = []
   for (const line of srt.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed || /^\d+$/.test(trimmed) || trimmed.includes('-->')) continue
+    if (/^(WEBVTT|NOTE|Kind:|Language:)/i.test(trimmed)) continue
     const clean = trimmed.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
     if (clean && !seen.has(clean)) { seen.add(clean); lines.push(clean) }
   }
