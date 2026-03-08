@@ -2,8 +2,8 @@ import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction
 
 const BASE = '/api'
 
-export async function fetchYouTubeFeed(offset = 0, limit = 30): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
-  const res = await fetch(`${BASE}/youtube/feed?offset=${offset}&limit=${limit}`)
+export async function fetchYouTubeFeed(offset = 0, limit = 30, includeBlocked = false): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
+  const res = await fetch(`${BASE}/youtube/feed?offset=${offset}&limit=${limit}&includeBlocked=${includeBlocked ? '1' : '0'}`)
   if (!res.ok) throw new Error(`Feed error: ${res.status}`)
   return res.json()
 }
@@ -25,13 +25,24 @@ export async function fetchSummary(id: string): Promise<Summary> {
   return res.json()
 }
 
-export async function createSummary(videoUrl: string, meta?: { title?: string; channel?: string; thumbnail?: string }, lang?: string): Promise<{ id: string; status: string }> {
+export async function createSummary(
+  videoUrl: string,
+  meta?: { title?: string; channel?: string; thumbnail?: string },
+  lang?: string,
+  model?: string,
+): Promise<{ id: string; status: string }> {
   const res = await fetch(`${BASE}/summaries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang }),
+    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model }),
   })
   if (!res.ok) throw new Error(`Create error: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchVideoSummaries(videoId: string): Promise<SummaryListItem[]> {
+  const res = await fetch(`${BASE}/videos/${videoId}/summaries`)
+  if (!res.ok) throw new Error(`Video summaries error: ${res.status}`)
   return res.json()
 }
 

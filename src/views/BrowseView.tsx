@@ -4,6 +4,7 @@ import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetc
 import type { YouTubeVideo } from '../../shared/types'
 import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
+import { SegmentedControl } from '../components/SegmentedControl'
 
 const PAGE_SIZE = 30
 
@@ -23,6 +24,8 @@ export default function BrowseView() {
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [manualUrl, setManualUrl] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [channelFilterMode, setChannelFilterMode] = useState<'filtered' | 'all'>('filtered')
+  const showAllChannels = channelFilterMode === 'all'
 
   async function refreshSummaryStatusMaps() {
     try {
@@ -43,7 +46,7 @@ export default function BrowseView() {
     try {
       const offset = reset ? 0 : videosLenRef.current
       if (!reset) setLoadingMore(true)
-      const data = await fetchYouTubeFeed(offset, PAGE_SIZE)
+      const data = await fetchYouTubeFeed(offset, PAGE_SIZE, showAllChannels)
       setVideos(prev => {
         if (reset) return data.videos
         const existingIds = new Set(prev.map(v => v.id))
@@ -62,14 +65,14 @@ export default function BrowseView() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [])
+  }, [showAllChannels])
 
   async function handleRefresh() {
     await refreshYouTubeFeed()
     loadFeed(true)
   }
 
-  useEffect(() => { loadFeed(true) }, [])
+  useEffect(() => { loadFeed(true) }, [loadFeed])
   useEffect(() => { refreshSummaryStatusMaps() }, [])
 
   // Infinite scroll via IntersectionObserver
@@ -181,7 +184,9 @@ export default function BrowseView() {
       if (s.blockedChannels.some(c => c.toLowerCase() === channel.toLowerCase())) return
       const updated = [...s.blockedChannels, channel]
       await updateSettings({ blockedChannels: updated })
-      setVideos(prev => prev.filter(v => v.channel.toLowerCase() !== channel.toLowerCase()))
+      if (!showAllChannels) {
+        setVideos(prev => prev.filter(v => v.channel.toLowerCase() !== channel.toLowerCase()))
+      }
     } catch (e: any) { alert(`Fehler: ${e.message}`) }
   }
 
@@ -193,6 +198,15 @@ export default function BrowseView() {
           {!loading && <span className="text-xs text-slate-400">{videos.length} Videos</span>}
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center text-xs">
+            <SegmentedControl<'filtered' | 'all'>
+              className="mini"
+              values={['filtered', 'all']}
+              labels={['Gefiltert', 'Alle']}
+              value={channelFilterMode}
+              onChange={setChannelFilterMode}
+            />
+          </div>
           <button onClick={() => { setManualUrl(''); setLinkModalOpen(true) }} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors">
             <LinkIcon className="w-3.5 h-3.5" /> YouTube Link
           </button>

@@ -19,6 +19,7 @@ db.exec(`
     video_url     TEXT NOT NULL,
     video_title   TEXT NOT NULL DEFAULT '',
     channel_name  TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
     thumbnail_url TEXT NOT NULL DEFAULT '',
     lang          TEXT NOT NULL DEFAULT 'de',
     transcript    TEXT DEFAULT '',
@@ -68,6 +69,7 @@ db.exec(`
 
 // Migrations for existing databases
 try { db.exec('ALTER TABLE summaries ADD COLUMN author TEXT NOT NULL DEFAULT ""') } catch {}
+try { db.exec('ALTER TABLE summaries ADD COLUMN model TEXT NOT NULL DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE predictions ADD COLUMN author TEXT NOT NULL DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE predictions ADD COLUMN if_cases TEXT NOT NULL DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE predictions ADD COLUMN price_target TEXT NOT NULL DEFAULT ""') } catch {}

@@ -1,9 +1,9 @@
 import db from './database'
 import type { Summary, SummaryListItem } from '../../shared/types'
 
-const LIST_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries ORDER BY created_at DESC`
+const LIST_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries ORDER BY created_at DESC`
 
-const DETAIL_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, thumbnail_url AS thumbnailUrl, lang, transcript, summary, custom_prompt AS customPrompt, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries WHERE id = ?`
+const DETAIL_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, transcript, summary, custom_prompt AS customPrompt, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries WHERE id = ?`
 
 export function getAllSummaries(): SummaryListItem[] {
   return db.query(LIST_QUERY).all() as SummaryListItem[]
@@ -13,14 +13,26 @@ export function getSummaryById(id: string): Summary | null {
   return db.query(DETAIL_QUERY).get(id) as Summary | null
 }
 
-export function getSummarizedVideoIds(): Map<string, string> {
-  const rows = db.query('SELECT video_id, id FROM summaries WHERE status != ?').all('error') as { video_id: string; id: string }[]
-  return new Map(rows.map(r => [r.video_id, r.id]))
+export function getSummariesByVideoId(videoId: string): SummaryListItem[] {
+  return db.query(
+    'SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,\' \',\'T\')||\'Z\' AS createdAt FROM summaries WHERE video_id = ? ORDER BY created_at DESC',
+  ).all(videoId) as SummaryListItem[]
 }
 
-export function createSummary(videoId: string, videoUrl: string, lang: string, title = '', channel = '', thumbnail = ''): string {
+export function getSummarizedVideoIds(): Map<string, string> {
+  const rows = db.query(
+    'SELECT video_id, id FROM summaries WHERE status != ? ORDER BY created_at DESC',
+  ).all('error') as { video_id: string; id: string }[]
+  const map = new Map<string, string>()
+  for (const row of rows) {
+    if (!map.has(row.video_id)) map.set(row.video_id, row.id)
+  }
+  return map
+}
+
+export function createSummary(videoId: string, videoUrl: string, lang: string, model: string, title = '', channel = '', thumbnail = ''): string {
   const id = `${Date.now()}_${videoId}`
-  db.query('INSERT INTO summaries (id, video_id, video_url, lang, video_title, channel_name, thumbnail_url) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, videoId, videoUrl, lang, title, channel, thumbnail)
+  db.query('INSERT INTO summaries (id, video_id, video_url, lang, model, video_title, channel_name, thumbnail_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, videoId, videoUrl, lang, model, title, channel, thumbnail)
   return id
 }
 

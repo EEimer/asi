@@ -119,6 +119,7 @@ export interface TranscriptContext {
 
 export async function summarizeTranscript(
   transcript: string,
+  model: string,
   onProgress?: ProgressCallback,
   context?: TranscriptContext,
 ): Promise<string> {
@@ -134,7 +135,7 @@ export async function summarizeTranscript(
 
   if (wordCount <= MAX_CHUNK_WORDS) {
     onProgress?.(`Zusammenfassung läuft (${wordCount.toLocaleString('de-DE')} Wörter)...`)
-    return callModel(settings.openaiModel, promptText, userPrefix + transcript)
+    return callModel(model, promptText, userPrefix + transcript)
   }
 
   const chunks = splitIntoChunks(transcript, MAX_CHUNK_WORDS)
@@ -146,7 +147,7 @@ export async function summarizeTranscript(
     onProgress?.(`Teil ${i + 1}/${chunks.length} wird analysiert (${chunkWords.toLocaleString('de-DE')} Wörter)...`)
     const chunkMeta = metaHeader ? `${metaHeader}\n\n` : ''
     const result = await callModel(
-      settings.openaiModel,
+      model,
       `${CHUNK_SYSTEM_PROMPT}\n\nDies ist Teil ${i + 1} von ${chunks.length}.`,
       chunkMeta + chunks[i],
     )
@@ -156,5 +157,5 @@ export async function summarizeTranscript(
   onProgress?.('Ergebnisse werden zur finalen Zusammenfassung kombiniert...')
   const mergedInput = chunkResults.map((r, i) => `--- Teil ${i + 1} ---\n${r}`).join('\n\n')
   const mergePrefix = metaHeader ? `${metaHeader}\n\n${MERGE_USER_PREFIX}` : MERGE_USER_PREFIX
-  return callModel(settings.openaiModel, promptText, mergePrefix + mergedInput)
+  return callModel(model, promptText, mergePrefix + mergedInput)
 }

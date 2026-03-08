@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
-import { getAllSummaries, getSummaryById, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
+import { getAllSummaries, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
 import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
 import { getAllPredictions, insertPredictions, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
 import { extractSummaryMeta } from './services/tableParser'
@@ -24,7 +24,7 @@ function emitStep(summaryId: string, videoTitle: string, step: ProcessingEvent['
   emitEvent({ summaryId, videoTitle, step, message, timestamp: new Date().toISOString() })
 }
 
-async function processSummary(id: string, videoUrl: string, lang: string, knownTitle: string) {
+async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string) {
   const label = knownTitle || videoUrl
   try {
     emitStep(id, label, 'metadata', 'Video-Metadaten werden geladen...')
@@ -41,9 +41,9 @@ async function processSummary(id: string, videoUrl: string, lang: string, knownT
       updateSummaryLang(id, usedLang)
     }
 
-    emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${loadSettings().openaiModel})...`)
+    emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${model})...`)
     const settings = loadSettings()
-    const summary = await summarizeTranscript(transcript, (msg) => {
+    const summary = await summarizeTranscript(transcript, model, (msg) => {
       emitStep(id, title, 'summarizing', msg)
     }, { title, channel: meta.channel })
     updateSummaryDone(id, transcript, summary, settings.summaryPrompt)
@@ -108,8 +108,12 @@ const app = new Elysia()
   .get('/api/youtube/feed', async ({ query }) => {
     const offset = Number(query.offset) || 0
     const limit = Number(query.limit) || 30
+    const includeBlocked = query.includeBlocked === '1' || query.includeBlocked === 'true'
     const { videos, total, hasMore } = await fetchSubscriptionFeed(offset, limit)
     const summarized = getSummarizedVideoIds()
+    if (includeBlocked) {
+      return { videos: videos.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
+    }
     const blockedRaw = loadSettings().blockedChannels.map(c => c.replace(/^@/, '').toLowerCase())
     const blocked = new Set(blockedRaw)
     const filtered = videos.filter(v => {
@@ -119,7 +123,7 @@ const app = new Elysia()
       return true
     })
     return { videos: filtered.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
-  }, { query: t.Object({ offset: t.Optional(t.String()), limit: t.Optional(t.String()) }) })
+  }, { query: t.Object({ offset: t.Optional(t.String()), limit: t.Optional(t.String()), includeBlocked: t.Optional(t.String()) }) })
 
   .post('/api/youtube/feed/refresh', () => {
     invalidateFeedCache()
@@ -131,13 +135,15 @@ const app = new Elysia()
 
   .post('/api/summaries', ({ body }) => {
     const videoId = extractVideoId(body.videoUrl)
-    const lang = body.lang ?? loadSettings().defaultLang
+    const settings = loadSettings()
+    const lang = body.lang ?? settings.defaultLang
+    const model = body.model ?? settings.openaiModel
     const title = body.videoTitle ?? ''
     const channel = body.channelName ?? ''
     const thumbnail = body.thumbnailUrl ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
-    const id = createSummary(videoId, body.videoUrl, lang, title, channel, thumbnail)
+    const id = createSummary(videoId, body.videoUrl, lang, model, title, channel, thumbnail)
     emitStep(id, title || body.videoUrl, 'queued', 'In Warteschlange...')
-    processSummary(id, body.videoUrl, lang, title)
+    processSummary(id, body.videoUrl, lang, model, title)
     return { id, status: 'processing' }
   }, { body: t.Object({
     videoUrl: t.String(),
@@ -145,7 +151,12 @@ const app = new Elysia()
     channelName: t.Optional(t.String()),
     thumbnailUrl: t.Optional(t.String()),
     lang: t.Optional(t.String()),
+    model: t.Optional(t.String()),
   }) })
+
+  .get('/api/videos/:videoId/summaries', ({ params }) => {
+    return getSummariesByVideoId(params.videoId)
+  })
 
   .get('/api/summaries/:id', ({ params }) => {
     const summary = getSummaryById(params.id)
@@ -164,7 +175,7 @@ const app = new Elysia()
     const ok = resetSummaryForRetry(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Retry failed' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
-    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.videoTitle || '')
+    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '')
     return { ok: true, id: summary.id, status: 'processing' }
   })
 

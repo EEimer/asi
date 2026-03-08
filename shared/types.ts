@@ -21,6 +21,7 @@ export interface Summary {
   videoTitle: string
   channelName: string
   author: string
+  model: string
   thumbnailUrl: string
   lang: string
   transcript: string
@@ -39,6 +40,7 @@ export interface CreateSummaryRequest {
   channelName?: string
   thumbnailUrl?: string
   lang?: string
+  model?: string
 }
 
 export interface Note {

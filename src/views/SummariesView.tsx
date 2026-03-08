@@ -12,6 +12,18 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 }
 
 const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag']
+const MODEL_LABELS: Record<string, string> = {
+  'gpt-4o': 'GPT-4o',
+  'gpt-4o-mini': '4o Mini',
+  'gpt-4-turbo': 'GPT-4 Turbo',
+  'claude-3-5-haiku-latest': 'Haiku',
+  'claude-sonnet-4-6': 'Sonnet',
+  'claude-opus-4-1': 'Opus',
+}
+
+function modelShortLabel(model: string): string {
+  return MODEL_LABELS[model] ?? model
+}
 
 function extractTldr(summary: string): string {
   const match = summary.match(/##\s*TLDR\s*\n([\s\S]*?)(?=\n##\s|\n---|\s*$)/)
@@ -93,10 +105,18 @@ export default function SummariesView() {
     return (s.videoTitle ?? '').toLowerCase().includes(q) || (s.channelName ?? '').toLowerCase().includes(q) || (s.summary ?? '').toLowerCase().includes(q)
   })
 
+  const latestPerVideo: SummaryListItem[] = []
+  const seenVideoIds = new Set<string>()
+  for (const s of filtered) {
+    if (seenVideoIds.has(s.videoId)) continue
+    seenVideoIds.add(s.videoId)
+    latestPerVideo.push(s)
+  }
+
   // Group by date
   const grouped: { dateKey: string; label: string; items: SummaryListItem[] }[] = []
   let lastKey = ''
-  for (const s of filtered) {
+  for (const s of latestPerVideo) {
     const key = formatDateKey(s.createdAt)
     if (key !== lastKey) {
       grouped.push({ dateKey: key, label: formatDateLabel(key), items: [] })
@@ -140,6 +160,11 @@ export default function SummariesView() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start gap-2">
                           <h3 className="font-semibold text-slate-900 text-sm truncate flex-1 min-w-0">{s.videoTitle || (s.status === 'processing' ? 'Wird verarbeitet...' : 'Ohne Titel')}</h3>
+                          {s.model && (
+                            <span className="shrink-0 inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border text-violet-700 bg-violet-50 border-violet-200">
+                              {modelShortLabel(s.model)}
+                            </span>
+                          )}
                           <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${badge.cls}`}>
                             {s.status === 'processing' && <Loader2 className="w-3 h-3 animate-spin" />}
                             {badge.label}
