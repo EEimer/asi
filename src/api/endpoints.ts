@@ -19,6 +19,12 @@ export async function fetchSummaries(): Promise<SummaryListItem[]> {
   return res.json()
 }
 
+export async function fetchSummariesPaged(offset = 0, limit = 20): Promise<{ items: SummaryListItem[]; total: number; hasMore: boolean }> {
+  const res = await fetch(`${BASE}/summaries/paged?offset=${offset}&limit=${limit}`)
+  if (!res.ok) throw new Error(`Summaries paged error: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchSummary(id: string): Promise<Summary> {
   const res = await fetch(`${BASE}/summaries/${id}`)
   if (!res.ok) throw new Error(`Summary error: ${res.status}`)

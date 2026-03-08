@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
-import { getAllSummaries, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
+import { getAllSummaries, getSummariesPage, getSummariesCount, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
 import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
 import { getAllPredictions, insertPredictions, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
 import { extractSummaryMeta } from './services/tableParser'
@@ -132,6 +132,14 @@ const app = new Elysia()
 
   // Summaries CRUD
   .get('/api/summaries', () => getAllSummaries())
+
+  .get('/api/summaries/paged', ({ query }) => {
+    const offset = Number(query.offset) || 0
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20))
+    const items = getSummariesPage(offset, limit)
+    const total = getSummariesCount()
+    return { items, total, hasMore: offset + items.length < total }
+  }, { query: t.Object({ offset: t.Optional(t.String()), limit: t.Optional(t.String()) }) })
 
   .post('/api/summaries', ({ body }) => {
     const videoId = extractVideoId(body.videoUrl)

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchSummaries, deleteSummary, retrySummary } from '../api/endpoints'
+import { fetchSummariesPaged, deleteSummary, retrySummary } from '../api/endpoints'
 import type { SummaryListItem } from '../../shared/types'
 import { Clock, Trash2, ExternalLink, Loader2, FileText, AlertCircle, RotateCcw } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
@@ -10,6 +10,7 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
   processing: { cls: 'text-primary bg-primary/10 border-primary/30 animate-pulse-slow', label: 'Verarbeite...' },
   error: { cls: 'text-danger bg-danger/10 border-danger/30', label: 'Fehler' },
 }
+const PAGE_SIZE = 20
 
 const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag']
 const MODEL_LABELS: Record<string, string> = {
@@ -55,23 +56,64 @@ function formatDateLabel(dateKey: string): string {
 export default function SummariesView() {
   const [summaries, setSummaries] = useState<SummaryListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
   const [search, setSearch] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [retryingId, setRetryingId] = useState<string | null>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const summariesLenRef = useRef(0)
+  summariesLenRef.current = summaries.length
 
-  useEffect(() => { loadSummaries() }, [])
+  const loadSummaries = useCallback(async (reset = true) => {
+    try {
+      const offset = reset ? 0 : summariesLenRef.current
+      if (reset) setLoading(true)
+      else setLoadingMore(true)
+      const data = await fetchSummariesPaged(offset, PAGE_SIZE)
+      setSummaries(prev => {
+        if (reset) return data.items
+        const existingIds = new Set(prev.map(s => s.id))
+        const appended = data.items.filter(s => !existingIds.has(s.id))
+        return [...prev, ...appended]
+      })
+      setHasMore(data.hasMore)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+      setLoadingMore(false)
+    }
+  }, [])
+
+  useEffect(() => { loadSummaries(true) }, [loadSummaries])
 
   useEffect(() => {
     const hasProcessing = summaries.some(s => s.status === 'processing')
     if (!hasProcessing) return
-    const interval = setInterval(loadSummaries, 3000)
+    const interval = setInterval(async () => {
+      try {
+        const count = Math.max(summariesLenRef.current, PAGE_SIZE)
+        const data = await fetchSummariesPaged(0, count)
+        setSummaries(data.items)
+        setHasMore(data.hasMore)
+      } catch (e) {
+        console.error(e)
+      }
+    }, 3000)
     return () => clearInterval(interval)
   }, [summaries])
 
-  async function loadSummaries() {
-    try { setSummaries(await fetchSummaries()) } catch (e) { console.error(e) }
-    finally { setLoading(false) }
-  }
+  useEffect(() => {
+    if (!hasMore || loadingMore) return
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) loadSummaries(false)
+    }, { rootMargin: '200px' })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, loadingMore, loadSummaries])
 
   async function handleDelete(id: string) {
     await deleteSummary(id)
@@ -208,6 +250,14 @@ export default function SummariesView() {
           </div>
         </div>
       ))}
+
+      <div ref={sentinelRef} className="h-1" />
+      {loadingMore && (
+        <div className="flex items-center justify-center py-6">
+          <Loader2 className="w-5 h-5 animate-spin text-primary mr-2" />
+          <span className="text-sm text-slate-500">Mehr Zusammenfassungen laden...</span>
+        </div>
+      )}
 
       <ConfirmModal
         open={!!deleteTarget}

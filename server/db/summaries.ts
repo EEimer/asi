@@ -9,6 +9,17 @@ export function getAllSummaries(): SummaryListItem[] {
   return db.query(LIST_QUERY).all() as SummaryListItem[]
 }
 
+export function getSummariesPage(offset: number, limit: number): SummaryListItem[] {
+  return db.query(
+    'SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,\' \',\'T\')||\'Z\' AS createdAt FROM summaries ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  ).all(limit, offset) as SummaryListItem[]
+}
+
+export function getSummariesCount(): number {
+  const row = db.query('SELECT COUNT(*) AS count FROM summaries').get() as { count: number }
+  return row?.count ?? 0
+}
+
 export function getSummaryById(id: string): Summary | null {
   return db.query(DETAIL_QUERY).get(id) as Summary | null
 }
