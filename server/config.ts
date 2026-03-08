@@ -2,6 +2,7 @@ import { DEFAULT_SETTINGS } from '../shared/types'
 import { getSettings } from './db/settings'
 
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? ''
+export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? ''
 
 export function loadSettings() {
   const dbSettings = getSettings()
@@ -9,3 +10,4 @@ export function loadSettings() {
 }
 
 if (!OPENAI_API_KEY) console.warn('[config] OPENAI_API_KEY not set -- summarization will fail')
+if (!ANTHROPIC_API_KEY) console.warn('[config] ANTHROPIC_API_KEY not set -- Claude models will fail')

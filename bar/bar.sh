@@ -1,5 +1,8 @@
 #!/bin/bash
 
+
+# SWIFTBAR FOR OSX
+
 SERVER_RUNNING=$(ps aux | grep "[b]un" | grep "server/index.ts")
 VITE_RUNNING=$(ps aux | grep "[v]ite" | grep -v "grep")
 

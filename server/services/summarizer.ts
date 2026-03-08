@@ -1,4 +1,4 @@
-import { OPENAI_API_KEY, loadSettings } from '../config'
+import { OPENAI_API_KEY, ANTHROPIC_API_KEY, loadSettings } from '../config'
 
 const MAX_CHUNK_WORDS = 12_000
 const OVERLAP_WORDS = 200
@@ -66,6 +66,52 @@ async function callOpenAI(
   return data.choices?.[0]?.message?.content ?? ''
 }
 
+async function callAnthropic(
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  maxTokens = 4000,
+): Promise<string> {
+  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured')
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+      temperature: 0.3,
+      max_tokens: maxTokens,
+    }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 300)}`)
+  }
+
+  const data = await response.json() as any
+  const firstText = data.content?.find?.((c: any) => c?.type === 'text')?.text
+  return firstText ?? ''
+}
+
+async function callModel(
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  maxTokens = 4000,
+): Promise<string> {
+  if (model.toLowerCase().startsWith('claude')) {
+    return callAnthropic(model, systemPrompt, userContent, maxTokens)
+  }
+  return callOpenAI(model, systemPrompt, userContent, maxTokens)
+}
+
 export interface TranscriptContext {
   title?: string
   channel?: string
@@ -88,7 +134,7 @@ export async function summarizeTranscript(
 
   if (wordCount <= MAX_CHUNK_WORDS) {
     onProgress?.(`Zusammenfassung läuft (${wordCount.toLocaleString('de-DE')} Wörter)...`)
-    return callOpenAI(settings.openaiModel, promptText, userPrefix + transcript)
+    return callModel(settings.openaiModel, promptText, userPrefix + transcript)
   }
 
   const chunks = splitIntoChunks(transcript, MAX_CHUNK_WORDS)
@@ -99,7 +145,7 @@ export async function summarizeTranscript(
     const chunkWords = countWords(chunks[i])
     onProgress?.(`Teil ${i + 1}/${chunks.length} wird analysiert (${chunkWords.toLocaleString('de-DE')} Wörter)...`)
     const chunkMeta = metaHeader ? `${metaHeader}\n\n` : ''
-    const result = await callOpenAI(
+    const result = await callModel(
       settings.openaiModel,
       `${CHUNK_SYSTEM_PROMPT}\n\nDies ist Teil ${i + 1} von ${chunks.length}.`,
       chunkMeta + chunks[i],
@@ -110,5 +156,5 @@ export async function summarizeTranscript(
   onProgress?.('Ergebnisse werden zur finalen Zusammenfassung kombiniert...')
   const mergedInput = chunkResults.map((r, i) => `--- Teil ${i + 1} ---\n${r}`).join('\n\n')
   const mergePrefix = metaHeader ? `${metaHeader}\n\n${MERGE_USER_PREFIX}` : MERGE_USER_PREFIX
-  return callOpenAI(settings.openaiModel, promptText, mergePrefix + mergedInput)
+  return callModel(settings.openaiModel, promptText, mergePrefix + mergedInput)
 }

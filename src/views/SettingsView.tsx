@@ -28,6 +28,9 @@ const MODEL_OPTIONS = [
   { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini (günstiger)' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'claude-3-5-haiku-latest', label: 'Claude Haiku 4.5' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-opus-4-1', label: 'Claude Opus' },
 ]
 
 type DangerTarget = 'summaries' | 'notes' | 'predictions' | 'settings' | null
@@ -126,12 +129,23 @@ export default function SettingsView() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-800 mb-2">OpenAI Model</label>
+            <label className="block text-sm font-medium text-slate-800 mb-2">KI Modell</label>
             <select value={settings.openaiModel} onChange={e => setSettings(s => ({ ...s, openaiModel: e.target.value }))}
               className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
               {MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Speichern...' : saved ? 'Gespeichert' : 'Speichern'}
+          </button>
+          <button onClick={() => setResetOpen(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
+            <RotateCcw className="w-4 h-4" /> Zurücksetzen
+          </button>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -182,17 +196,6 @@ export default function SettingsView() {
               ))}
             </div>
           )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {saving ? 'Speichern...' : saved ? 'Gespeichert' : 'Speichern'}
-          </button>
-          <button onClick={() => setResetOpen(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
-            <RotateCcw className="w-4 h-4" /> Zurücksetzen
-          </button>
         </div>
 
         <div className="bg-white border border-danger/30 rounded-xl overflow-hidden">
