@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useToast, type ToastMessage } from '../store/toastStore'
 import { Check, AlertCircle, Info, AlertTriangle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 const toneStyles: Record<ToastMessage['tone'], string> = {
   success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -15,18 +16,20 @@ const toneIcons: Record<ToastMessage['tone'], typeof Check> = {
 
 export default function ToastStack() {
   const { toasts, removeToast } = useToast()
+  const navigate = useNavigate()
 
   return (
     <div className="fixed right-6 top-[70px] z-[9999] flex w-[360px] flex-col gap-2">
-      {toasts.map(toast => <ToastItem key={toast.id} toast={toast} onRemove={removeToast} />)}
+      {toasts.map(toast => <ToastItem key={toast.id} toast={toast} onRemove={removeToast} onNavigate={navigate} />)}
     </div>
   )
 }
 
-function ToastItem({ toast, onRemove }: { toast: ToastMessage; onRemove: (id: string) => void }) {
+function ToastItem({ toast, onRemove, onNavigate }: { toast: ToastMessage; onRemove: (id: string) => void; onNavigate: (to: string) => void }) {
   const [visible, setVisible] = useState(false)
   const [closing, setClosing] = useState(false)
   const Icon = toneIcons[toast.tone]
+  const isClickable = !!toast.to
 
   useEffect(() => {
     const enter = setTimeout(() => setVisible(true), 10)
@@ -35,8 +38,27 @@ function ToastItem({ toast, onRemove }: { toast: ToastMessage; onRemove: (id: st
     return () => { clearTimeout(enter); clearTimeout(close); clearTimeout(remove) }
   }, [toast, onRemove])
 
+  const baseClass = `overflow-hidden rounded-lg border px-4 py-3 text-sm shadow-sm transition-all duration-300 flex items-center gap-2.5 ${toneStyles[toast.tone]} ${visible && !closing ? 'max-h-40 opacity-100 translate-x-0' : 'max-h-0 opacity-0 translate-x-4'}`
+
+  if (isClickable) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          if (!toast.to) return
+          onNavigate(toast.to)
+          onRemove(toast.id)
+        }}
+        className={`${baseClass} w-full text-left hover:brightness-95 cursor-pointer`}
+      >
+        <Icon className="w-4 h-4 shrink-0" />
+        <span className="break-words">{toast.message}</span>
+      </button>
+    )
+  }
+
   return (
-    <div className={`overflow-hidden rounded-lg border px-4 py-3 text-sm shadow-sm transition-all duration-300 flex items-center gap-2.5 ${toneStyles[toast.tone]} ${visible && !closing ? 'max-h-40 opacity-100 translate-x-0' : 'max-h-0 opacity-0 translate-x-4'}`}>
+    <div className={baseClass}>
       <Icon className="w-4 h-4 shrink-0" />
       <span className="break-words">{toast.message}</span>
     </div>

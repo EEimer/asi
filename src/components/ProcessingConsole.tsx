@@ -38,7 +38,7 @@ export default function ProcessingConsole() {
 
           if (event.step === 'done' && !toastedRef.current.has(event.summaryId)) {
             toastedRef.current.add(event.summaryId)
-            addToast(`${event.videoTitle} – Zusammenfassung fertig!`, 'success', 4000)
+            addToast(`${event.videoTitle} – Zusammenfassung fertig!`, 'success', 4000, `/summaries/${event.summaryId}`)
           }
           if (event.step === 'error' && !toastedRef.current.has(event.summaryId)) {
             toastedRef.current.add(event.summaryId)

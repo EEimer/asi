@@ -28,7 +28,7 @@ const MODEL_OPTIONS = [
   { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini (günstiger)' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'claude-3-5-haiku-latest', label: 'Claude Haiku 4.5' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { value: 'claude-opus-4-1', label: 'Claude Opus' },
 ]
@@ -44,15 +44,21 @@ const DANGER_LABELS: Record<string, { title: string; desc: string; confirm: stri
 
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
+  const [lastSavedSettings, setLastSavedSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [resetOpen, setResetOpen] = useState(false)
   const [dangerTarget, setDangerTarget] = useState<DangerTarget>(null)
   const { addToast } = useToast()
 
   useEffect(() => {
-    fetchSettings().then(s => setSettings(s)).catch(console.error).finally(() => setLoading(false))
+    fetchSettings()
+      .then(s => {
+        setSettings(s)
+        setLastSavedSettings(s)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
   }, [])
 
   async function handleSave() {
@@ -60,15 +66,15 @@ export default function SettingsView() {
     setSaved(false)
     try {
       await updateSettings(settings)
+      setLastSavedSettings(settings)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: any) { alert(`Fehler: ${e.message}`) }
     finally { setSaving(false) }
   }
 
-  function handleReset() {
-    setSettings({ ...DEFAULT_SETTINGS })
-    setResetOpen(false)
+  function handleCancel() {
+    setSettings({ ...lastSavedSettings })
   }
 
   function addBlockedChannel(name: string) {
@@ -137,14 +143,14 @@ export default function SettingsView() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-end gap-3">
           <button onClick={handleSave} disabled={saving}
             className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
             {saving ? 'Speichern...' : saved ? 'Gespeichert' : 'Speichern'}
           </button>
-          <button onClick={() => setResetOpen(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
-            <RotateCcw className="w-4 h-4" /> Zurücksetzen
+          <button onClick={handleCancel} className="flex items-center gap-1.5 px-4 py-2 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
+            <RotateCcw className="w-4 h-4" /> Abbrechen
           </button>
         </div>
 
@@ -227,16 +233,6 @@ export default function SettingsView() {
           </div>
         </div>
       </div>
-
-      <ConfirmModal
-        open={resetOpen}
-        onClose={() => setResetOpen(false)}
-        onConfirm={handleReset}
-        title="Einstellungen zurücksetzen"
-        description="Alle Einstellungen auf Standardwerte zurücksetzen? Blockierte Kanäle werden ebenfalls gelöscht."
-        confirmLabel="Zurücksetzen"
-        variant="warning"
-      />
 
       {dangerTarget && (
         <ConfirmModal

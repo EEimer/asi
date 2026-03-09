@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries } from '../api/endpoints'
+import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions } from '../api/endpoints'
 import type { Summary, SummaryListItem } from '../../shared/types'
-import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
@@ -19,7 +19,7 @@ const MODEL_OPTIONS = [
   { value: 'gpt-4o', label: 'GPT-4o', shortLabel: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini', shortLabel: '4o Mini' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo', shortLabel: 'GPT-4 Turbo' },
-  { value: 'claude-3-5-haiku-latest', label: 'Claude Haiku 4.5', shortLabel: 'Haiku' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', shortLabel: 'Haiku' },
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', shortLabel: 'Sonnet' },
   { value: 'claude-opus-4-1', label: 'Claude Opus', shortLabel: 'Opus' },
 ]
@@ -108,6 +108,7 @@ interface PredictionsTableProps {
 function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channelName, author }: PredictionsTableProps) {
   const [items, setItems] = useState<ParsedPrediction[]>(predictions)
   const [addingRow, setAddingRow] = useState<number | null>(null)
+  const [addedRows, setAddedRows] = useState<Set<string>>(new Set())
   const [directAdding, setDirectAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [newDirection, setNewDirection] = useState('neutral')
@@ -115,10 +116,39 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
   const [newIfCases, setNewIfCases] = useState('')
   const { addToast } = useToast()
 
+  function rowKey(item: ParsedPrediction): string {
+    return [item.name, item.direction, item.if_cases, item.price_target].map(v => v.trim().toLowerCase()).join('||')
+  }
+
+  useEffect(() => {
+    let active = true
+    const loadAddedRows = async () => {
+      try {
+        const existing = await fetchPredictions()
+        if (!active) return
+        const keys = new Set(
+          existing
+            .filter(p => p.summaryId === summaryId)
+            .map(p => rowKey({ name: p.assetName, direction: p.direction, if_cases: p.ifCases, price_target: p.priceTarget })),
+        )
+        setAddedRows(keys)
+      } catch {
+        // Ignore: button state still updates after successful add
+      }
+    }
+    loadAddedRows()
+    return () => { active = false }
+  }, [summaryId])
+
   async function handleAddRow(item: ParsedPrediction, idx: number) {
     setAddingRow(idx)
     try {
       await addPredictions({ summaryId, videoTitle, videoUrl, channelName, author, predictions: [item] })
+      setAddedRows(prev => {
+        const next = new Set(prev)
+        next.add(rowKey(item))
+        return next
+      })
       addToast('Prognose zur Glaskugel hinzugefügt', 'success', 2200)
     } catch (e: any) {
       addToast(`Fehler: ${e.message}`, 'error', 5000)
@@ -177,6 +207,7 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
           <tbody>
             {items.map((p, i) => {
               const { cls, Icon } = directionBadge(p.direction)
+              const isAdded = addedRows.has(rowKey(p))
               return (
                 <tr key={i} className="border-t border-slate-100 transition-colors">
                   <td className="px-4 py-2.5 font-medium text-slate-900">{p.name}</td>
@@ -190,10 +221,10 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
                   <td className="w-24 px-3 py-2.5 text-center">
                     <button
                       onClick={() => handleAddRow(p, i)}
-                      disabled={addingRow === i}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-accent border border-accent/30 bg-accent/10 rounded-md hover:bg-accent/20 transition-colors disabled:opacity-40"
+                      disabled={addingRow === i || isAdded}
+                      className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md transition-colors disabled:opacity-60 ${isAdded ? 'text-success border border-success/30 bg-success/10' : 'text-accent border border-accent/30 bg-accent/10 hover:bg-accent/20'}`}
                     >
-                      {addingRow === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} Add
+                      {addingRow === i ? <Loader2 className="w-3 h-3 animate-spin" /> : isAdded ? <Check className="w-3 h-3" /> : <><Plus className="w-3 h-3" /> Add</>}
                     </button>
                   </td>
                 </tr>
@@ -272,6 +303,7 @@ export default function SummaryDetailView() {
   const [modelModalOpen, setModelModalOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState('gpt-4o')
   const [creatingModelSummary, setCreatingModelSummary] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -288,6 +320,20 @@ export default function SummaryDetailView() {
     load()
     return () => { active = false }
   }, [id])
+
+  useEffect(() => {
+    if (!id || summary?.status !== 'processing') return
+    const timeout = setTimeout(async () => {
+      try {
+        const s = await fetchSummary(id)
+        setSummary(s)
+        setSelectedModel(s.model || 'gpt-4o')
+      } catch {
+        /* ignore */
+      }
+    }, 3000)
+    return () => clearTimeout(timeout)
+  }, [id, summary?.status])
 
   useEffect(() => {
     if (!summary?.videoId) return
@@ -322,6 +368,17 @@ export default function SummaryDetailView() {
       navigate(`/summaries/${result.id}`)
     } finally {
       setCreatingModelSummary(false)
+    }
+  }
+
+  async function handleRetryFromDetail() {
+    if (!id) return
+    setRetrying(true)
+    try {
+      await retrySummary(id)
+      setSummary(prev => prev ? { ...prev, status: 'processing', errorMessage: '' } : prev)
+    } finally {
+      setRetrying(false)
     }
   }
 
@@ -419,6 +476,14 @@ export default function SummaryDetailView() {
               <div>
                 <p className="text-sm font-medium text-danger">Fehler bei der Verarbeitung</p>
                 <p className="text-xs text-slate-600 mt-1">{summary.errorMessage}</p>
+                <button
+                  onClick={handleRetryFromDetail}
+                  disabled={retrying}
+                  className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-danger/30 text-danger rounded-lg hover:bg-danger/10 transition-colors disabled:opacity-50"
+                >
+                  {retrying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                  Refresh
+                </button>
               </div>
             </div>
           )}

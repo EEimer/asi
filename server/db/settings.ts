@@ -19,7 +19,10 @@ export function getSettings(): Partial<Settings> {
   for (const row of rows) {
     const mapped = KEY_MAP[row.key]
     if (mapped) {
-      result[mapped] = JSON_KEYS.has(mapped) ? JSON.parse(row.value) : row.value
+      const parsed = JSON_KEYS.has(mapped) ? JSON.parse(row.value) : row.value
+      result[mapped] = mapped === 'openaiModel' && parsed === 'claude-3-5-haiku-latest'
+        ? 'claude-haiku-4-5'
+        : parsed
     }
   }
   return result as Partial<Settings>

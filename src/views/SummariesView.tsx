@@ -17,7 +17,7 @@ const MODEL_LABELS: Record<string, string> = {
   'gpt-4o': 'GPT-4o',
   'gpt-4o-mini': '4o Mini',
   'gpt-4-turbo': 'GPT-4 Turbo',
-  'claude-3-5-haiku-latest': 'Haiku',
+  'claude-haiku-4-5': 'Haiku',
   'claude-sonnet-4-6': 'Sonnet',
   'claude-opus-4-1': 'Opus',
 }
