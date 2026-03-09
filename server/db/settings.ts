@@ -7,6 +7,9 @@ const KEY_MAP: Record<string, keyof Settings> = {
   cookie_browser: 'cookieBrowser',
   openai_model: 'openaiModel',
   blocked_channels: 'blockedChannels',
+  tts_model: 'ttsModel',
+  tts_voice: 'ttsVoice',
+  tts_instructions: 'ttsInstructions',
 }
 
 const JSON_KEYS = new Set<keyof Settings>(['blockedChannels'])

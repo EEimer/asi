@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
 
 const BASE = '/api'
 
@@ -153,4 +153,32 @@ export async function deletePrediction(id: string): Promise<void> {
 export async function resetTable(table: 'summaries' | 'notes' | 'predictions' | 'settings'): Promise<void> {
   const res = await fetch(`${BASE}/reset/${table}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Reset error: ${res.status}`)
+}
+
+export async function fetchTtsIndex(): Promise<TtsIndex> {
+  const res = await fetch(`${BASE}/tts/index`)
+  if (!res.ok) throw new Error(`TTS index error: ${res.status}`)
+  return res.json()
+}
+
+export async function generateTts(payload: {
+  summaryId: string
+  text: string
+  model?: TtsModel
+  voice?: TtsVoice
+  instructions?: string
+  forceRegenerate?: boolean
+  sendToTelegram?: boolean
+}): Promise<TtsGenerateResponse> {
+  const res = await fetch(`${BASE}/tts/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`TTS generate error: ${res.status}`)
+  return res.json()
+}
+
+export function getTtsAudioUrl(summaryId: string, variantKey: string): string {
+  return `${BASE}/tts/${encodeURIComponent(summaryId)}/${encodeURIComponent(variantKey)}`
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchSettings, updateSettings, resetTable } from '../api/endpoints'
-import type { Settings } from '../../shared/types'
+import type { Settings, TtsModel, TtsVoice } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
@@ -32,6 +32,20 @@ const MODEL_OPTIONS = [
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { value: 'claude-opus-4-1', label: 'Claude Opus' },
 ]
+
+const TTS_MODEL_OPTIONS: { value: TtsModel; label: string; hint: string }[] = [
+  { value: 'tts-1', label: 'tts-1', hint: 'Schnell, günstig (~$15/1M chars, ~$0.015/min)' },
+  { value: 'tts-1-hd', label: 'tts-1-hd', hint: 'Beste Qualität (~$30/1M chars, ~$0.030/min)' },
+  { value: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts', hint: 'Steuerbar via Instruktionen (~$15/1M chars, ~$0.015/min)' },
+]
+
+const TTS_CLASSIC_VOICES: TtsVoice[] = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']
+const TTS_EXTENDED_VOICES: TtsVoice[] = ['ballad', 'verse', 'marin', 'cedar']
+
+function availableVoices(model: TtsModel): TtsVoice[] {
+  if (model === 'gpt-4o-mini-tts') return [...TTS_CLASSIC_VOICES, ...TTS_EXTENDED_VOICES]
+  return TTS_CLASSIC_VOICES
+}
 
 type DangerTarget = 'summaries' | 'notes' | 'predictions' | 'settings' | null
 
@@ -90,6 +104,15 @@ export default function SettingsView() {
     updateSettings({ blockedChannels: updated }).catch(console.error)
   }
 
+  function updateTtsModel(value: TtsModel) {
+    setSettings(prev => {
+      const options = availableVoices(value)
+      const nextVoice = options.includes(prev.ttsVoice) ? prev.ttsVoice : 'nova'
+      const nextInstructions = value === 'gpt-4o-mini-tts' ? prev.ttsInstructions : ''
+      return { ...prev, ttsModel: value, ttsVoice: nextVoice, ttsInstructions: nextInstructions }
+    })
+  }
+
   async function handleDangerReset() {
     if (!dangerTarget) return
     try {
@@ -141,6 +164,51 @@ export default function SettingsView() {
               {MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-800 mb-3">Text-to-Speech</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-800 mb-2">TTS-Modell</label>
+              <select
+                value={settings.ttsModel}
+                onChange={e => updateTtsModel(e.target.value as TtsModel)}
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+              >
+                {TTS_MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">
+                {TTS_MODEL_OPTIONS.find(o => o.value === settings.ttsModel)?.hint}
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-800 mb-2">Stimme</label>
+              <select
+                value={settings.ttsVoice}
+                onChange={e => setSettings(s => ({ ...s, ttsVoice: e.target.value as TtsVoice }))}
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+              >
+                {availableVoices(settings.ttsModel).map(voice => {
+                  const recommended = settings.ttsModel === 'gpt-4o-mini-tts' && (voice === 'marin' || voice === 'cedar')
+                  return <option key={voice} value={voice}>{recommended ? `${voice} - ★ Empfohlen` : voice}</option>
+                })}
+              </select>
+            </div>
+          </div>
+          {settings.ttsModel === 'gpt-4o-mini-tts' && (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-slate-800 mb-2">Sprach-Instruktionen</label>
+              <input
+                type="text"
+                value={settings.ttsInstructions}
+                onChange={e => setSettings(s => ({ ...s, ttsInstructions: e.target.value }))}
+                placeholder={'z.B. "Speak slowly and clearly in German"'}
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+              />
+              <p className="mt-1 text-xs text-slate-500">Nur verfügbar für gpt-4o-mini-tts. Steuert Ton, Tempo und Stil der Stimme.</p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-3">

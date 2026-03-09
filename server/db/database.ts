@@ -90,6 +90,9 @@ const defaults: Record<string, string> = {
   default_lang: DEFAULT_SETTINGS.defaultLang,
   cookie_browser: DEFAULT_SETTINGS.cookieBrowser,
   openai_model: DEFAULT_SETTINGS.openaiModel,
+  tts_model: DEFAULT_SETTINGS.ttsModel,
+  tts_voice: DEFAULT_SETTINGS.ttsVoice,
+  tts_instructions: DEFAULT_SETTINGS.ttsInstructions,
 }
 const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
 for (const [key, value] of Object.entries(defaults)) {

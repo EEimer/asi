@@ -8,13 +8,17 @@ import { getSettings, updateSettings, resetSettings } from './db/settings'
 import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSubtitles, extractVideoId } from './services/youtube'
 import { summarizeTranscript } from './services/summarizer'
 import { loadSettings } from './config'
-import { DEFAULT_SETTINGS, type ProcessingEvent } from '../shared/types'
+import { clearAllTts, deleteTtsBySummary, ensureTtsStorage, getOrGenerateTts, getTtsIndex, resolveTtsFilePath } from './services/tts'
+import { sendAudioToTelegram } from './services/telegram'
+import { DEFAULT_SETTINGS, type ProcessingEvent, type TtsModel, type TtsVoice } from '../shared/types'
+import { existsSync } from 'node:fs'
 
 const port = Number(process.env.PORT ?? 8788)
 
 // SSE: Processing event bus
 type EventListener = (event: ProcessingEvent) => void
 const listeners = new Set<EventListener>()
+ensureTtsStorage()
 
 function emitEvent(event: ProcessingEvent) {
   for (const listener of listeners) listener(event)
@@ -24,15 +28,16 @@ function emitStep(summaryId: string, videoTitle: string, step: ProcessingEvent['
   emitEvent({ summaryId, videoTitle, step, message, timestamp: new Date().toISOString() })
 }
 
-async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string) {
+async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string) {
   const label = knownTitle || videoUrl
   try {
     emitStep(id, label, 'metadata', 'Video-Metadaten werden geladen...')
     const meta = await fetchVideoMeta(videoUrl)
     const videoId = extractVideoId(videoUrl)
     const title = meta.title !== 'Unknown' ? meta.title : knownTitle || 'Unknown'
+    const channel = meta.channel && meta.channel !== 'Unknown' ? meta.channel : knownChannel || ''
     const thumbnail = meta.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
-    updateSummaryMeta(id, title, meta.channel, thumbnail)
+    updateSummaryMeta(id, title, channel, thumbnail)
 
     emitStep(id, title, 'transcript', `Untertitel werden heruntergeladen (${lang}, en)...`)
     const { text: transcript, usedLang } = await downloadSubtitles(videoUrl, lang)
@@ -45,7 +50,7 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
     const settings = loadSettings()
     const summary = await summarizeTranscript(transcript, model, (msg) => {
       emitStep(id, title, 'summarizing', msg)
-    }, { title, channel: meta.channel })
+    }, { title, channel })
     updateSummaryDone(id, transcript, summary, settings.summaryPrompt)
 
     const { author } = extractSummaryMeta(summary)
@@ -102,6 +107,9 @@ const app = new Elysia()
     cookieBrowser: t.Optional(t.String()),
     openaiModel: t.Optional(t.String()),
     blockedChannels: t.Optional(t.Array(t.String())),
+    ttsModel: t.Optional(t.String()),
+    ttsVoice: t.Optional(t.String()),
+    ttsInstructions: t.Optional(t.String()),
   }) })
 
   // YouTube Feed (paginated)
@@ -151,7 +159,7 @@ const app = new Elysia()
     const thumbnail = body.thumbnailUrl ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
     const id = createSummary(videoId, body.videoUrl, lang, model, title, channel, thumbnail)
     emitStep(id, title || body.videoUrl, 'queued', 'In Warteschlange...')
-    processSummary(id, body.videoUrl, lang, model, title)
+    processSummary(id, body.videoUrl, lang, model, title, channel)
     return { id, status: 'processing' }
   }, { body: t.Object({
     videoUrl: t.String(),
@@ -183,15 +191,81 @@ const app = new Elysia()
     const ok = resetSummaryForRetry(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Retry failed' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
-    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '')
+    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '')
     return { ok: true, id: summary.id, status: 'processing' }
   })
 
   .delete('/api/summaries/:id', ({ params }) => {
     deletePredictionsBySummary(params.id)
+    deleteTtsBySummary(params.id)
     const ok = deleteSummary(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return { ok: true }
+  })
+
+  .get('/api/tts/index', () => getTtsIndex())
+
+  .post('/api/tts/generate', async ({ body }) => {
+    const summary = getSummaryById(body.summaryId)
+    const label = summary?.videoTitle || body.summaryId
+    const settings = loadSettings()
+    const requestedModel = (body.model ?? settings.ttsModel) as TtsModel
+    const requestedVoice = (body.voice ?? settings.ttsVoice) as TtsVoice
+    const requestedInstructions = body.instructions ?? settings.ttsInstructions
+
+    emitStep(body.summaryId, label, 'tts_generating', `TTS wird erstellt (${requestedModel}, ${requestedVoice})...`)
+    try {
+      const result = await getOrGenerateTts({
+        summaryId: body.summaryId,
+        text: body.text,
+        model: requestedModel,
+        voice: requestedVoice,
+        instructions: requestedInstructions,
+        forceRegenerate: body.forceRegenerate ?? false,
+      })
+      if (result.cached) emitStep(body.summaryId, label, 'tts_cached', `TTS Cache-Hit (${result.model}, ${result.voice})`)
+      else emitStep(body.summaryId, label, 'tts_done', `TTS erstellt (${result.model}, ${result.voice})`)
+
+      if (body.sendToTelegram) {
+        const filePath = resolveTtsFilePath(result.summaryId, result.variantKey)
+        emitStep(body.summaryId, label, 'tts_generating', 'Sende TTS an Telegram...')
+        await sendAudioToTelegram({
+          filePath,
+          caption: `${label} (${result.model}, ${result.voice})`,
+          title: label,
+        })
+        emitStep(body.summaryId, label, 'tts_done', 'TTS an Telegram gesendet')
+      }
+      return result
+    } catch (e: any) {
+      const message = e?.message ?? 'TTS-Fehler'
+      emitStep(body.summaryId, label, 'tts_error', message)
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
+  }, {
+    body: t.Object({
+      summaryId: t.String(),
+      text: t.String(),
+      model: t.Optional(t.String()),
+      voice: t.Optional(t.String()),
+      instructions: t.Optional(t.String()),
+      forceRegenerate: t.Optional(t.Boolean()),
+      sendToTelegram: t.Optional(t.Boolean()),
+    }),
+  })
+
+  .get('/api/tts/:summaryId/:variantKey', ({ params }) => {
+    const summaryId = decodeURIComponent(params.summaryId)
+    const variantKey = decodeURIComponent(params.variantKey)
+    const filePath = resolveTtsFilePath(summaryId, variantKey)
+    if (!existsSync(filePath)) {
+      return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }
+    return new Response(Bun.file(filePath), {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+      },
+    })
   })
 
   // Predictions
@@ -255,6 +329,7 @@ const app = new Elysia()
   .delete('/api/reset/summaries', () => {
     deleteAllPredictions()
     const deleted = deleteAllSummaries()
+    clearAllTts()
     return { ok: true, deleted }
   })
 

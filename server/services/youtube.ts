@@ -28,8 +28,22 @@ async function fetchChannelName(videoId: string): Promise<string> {
   } catch { return '' }
 }
 
+async function fetchOembedMeta(videoId: string): Promise<{ title: string; channel: string; thumbnail: string }> {
+  try {
+    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
+    if (!res.ok) return { title: '', channel: '', thumbnail: '' }
+    const data = await res.json() as any
+    return {
+      title: data.title ?? '',
+      channel: data.author_name ?? '',
+      thumbnail: data.thumbnail_url ?? '',
+    }
+  } catch {
+    return { title: '', channel: '', thumbnail: '' }
+  }
+}
+
 async function refreshFeedCache(targetCount: number) {
-  const previousCount = feedCache.length
   const proc = Bun.spawn(
     ['yt-dlp', '--flat-playlist', '--dump-json', ...cookieArgs(), '--playlist-end', String(targetCount), ':ytsubs'],
     { stdout: 'pipe', stderr: 'pipe' },
@@ -41,10 +55,12 @@ async function refreshFeedCache(targetCount: number) {
 
   if (proc.exitCode !== 0) throw new Error(`yt-dlp feed error: ${stderr.slice(0, 500)}`)
 
+  const lines = stdout.split('\n').filter(line => line.trim())
+  const fetchedEntryCount = lines.length
+
   const seen = new Set<string>()
   const videos: YouTubeVideo[] = []
-  for (const line of stdout.trim().split('\n')) {
-    if (!line.trim()) continue
+  for (const line of lines) {
     try {
       const j = JSON.parse(line)
       const id = j.id ?? ''
@@ -76,7 +92,10 @@ async function refreshFeedCache(targetCount: number) {
 
   feedCache = videos
   feedFetchedAt = Date.now()
-  feedExhausted = videos.length < targetCount
+  // Exhaustion must be based on fetched playlist entries, not filtered videos.
+  // We skip live/upcoming/duplicates, so valid video count can be < targetCount
+  // even when there are more entries available beyond `targetCount`.
+  feedExhausted = fetchedEntryCount < targetCount
 }
 
 export async function fetchSubscriptionFeed(offset = 0, limit = 30): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
@@ -103,6 +122,10 @@ export function invalidateFeedCache() {
 }
 
 export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string; channel: string; thumbnail: string }> {
+  const videoId = extractVideoId(videoUrl)
+  const fallbackThumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+  const oembed = await fetchOembedMeta(videoId)
+
   const proc = Bun.spawn(
     ['yt-dlp', '--dump-json', '--skip-download', ...cookieArgs(), videoUrl],
     { stdout: 'pipe', stderr: 'pipe' },
@@ -111,17 +134,27 @@ export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string;
   const stdout = await new Response(proc.stdout).text()
   await proc.exited
 
-  if (proc.exitCode !== 0) return { title: 'Unknown', channel: 'Unknown', thumbnail: '' }
+  if (proc.exitCode !== 0) {
+    return {
+      title: oembed.title || 'Unknown',
+      channel: oembed.channel || '',
+      thumbnail: oembed.thumbnail || fallbackThumb,
+    }
+  }
 
   try {
     const j = JSON.parse(stdout)
     return {
-      title: j.title ?? 'Unknown',
-      channel: j.channel ?? j.uploader ?? 'Unknown',
-      thumbnail: j.thumbnail ?? j.thumbnails?.at(-1)?.url ?? '',
+      title: j.title ?? oembed.title ?? 'Unknown',
+      channel: j.channel ?? j.uploader ?? oembed.channel ?? '',
+      thumbnail: j.thumbnail ?? j.thumbnails?.at(-1)?.url ?? oembed.thumbnail ?? fallbackThumb,
     }
   } catch {
-    return { title: 'Unknown', channel: 'Unknown', thumbnail: '' }
+    return {
+      title: oembed.title || 'Unknown',
+      channel: oembed.channel || '',
+      thumbnail: oembed.thumbnail || fallbackThumb,
+    }
   }
 }
 

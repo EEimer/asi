@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions } from '../api/endpoints'
-import type { Summary, SummaryListItem } from '../../shared/types'
-import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw } from 'lucide-react'
+import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions, fetchSettings, fetchTtsIndex, generateTts, getTtsAudioUrl } from '../api/endpoints'
+import type { Summary, SummaryListItem, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
+import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
 import { useToast } from '../store/toastStore'
+import { useAudioPlayer } from '../store/audioPlayerStore'
 
 interface ParsedPrediction {
   name: string
@@ -24,12 +25,42 @@ const MODEL_OPTIONS = [
   { value: 'claude-opus-4-1', label: 'Claude Opus', shortLabel: 'Opus' },
 ]
 
+const TTS_CLASSIC_VOICES: TtsVoice[] = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']
+const TTS_EXTENDED_VOICES: TtsVoice[] = ['ballad', 'verse', 'marin', 'cedar']
+
+interface TtsVariantDraft {
+  model: TtsModel
+  voice: TtsVoice
+  instructions: string
+}
+
 function modelLabel(model: string): string {
   return MODEL_OPTIONS.find(m => m.value === model)?.label ?? model
 }
 
 function modelShortLabel(model: string): string {
   return MODEL_OPTIONS.find(m => m.value === model)?.shortLabel ?? model
+}
+
+function ttsModelShortLabel(model: TtsModel): string {
+  if (model === 'tts-1') return 'tts-1'
+  if (model === 'tts-1-hd') return 'tts-1-hd'
+  return '4o-mini-tts'
+}
+
+function ttsVoiceOptions(model: TtsModel): TtsVoice[] {
+  if (model === 'gpt-4o-mini-tts') return [...TTS_CLASSIC_VOICES, ...TTS_EXTENDED_VOICES]
+  return TTS_CLASSIC_VOICES
+}
+
+function normalizeInstructions(value: string): string {
+  return value.trim()
+}
+
+function estimateDurationSecondsFromText(text: string): number {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return 0
+  return Math.max(1, Math.round(normalized.length / 14))
 }
 
 function stripMetadataSection(text: string): string {
@@ -304,6 +335,18 @@ export default function SummaryDetailView() {
   const [selectedModel, setSelectedModel] = useState('gpt-4o')
   const [creatingModelSummary, setCreatingModelSummary] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [ttsDefaults, setTtsDefaults] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
+  const [ttsConfig, setTtsConfig] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
+  const [ttsDraft, setTtsDraft] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
+  const [ttsConfigOpen, setTtsConfigOpen] = useState(false)
+  const [ttsIndex, setTtsIndex] = useState<TtsIndex>({})
+  const [ttsLoading, setTtsLoading] = useState(false)
+  const [ttsError, setTtsError] = useState('')
+  const [ttsAlreadyExistsOpen, setTtsAlreadyExistsOpen] = useState(false)
+  const [pendingCachedVariantKey, setPendingCachedVariantKey] = useState<string | null>(null)
+  const [pendingCachedConfig, setPendingCachedConfig] = useState<TtsVariantDraft | null>(null)
+  const player = useAudioPlayer()
+  const { addToast } = useToast()
 
   useEffect(() => {
     if (!id) return
@@ -320,6 +363,28 @@ export default function SummaryDetailView() {
     load()
     return () => { active = false }
   }, [id])
+
+  useEffect(() => {
+    let active = true
+    const loadTtsConfig = async () => {
+      try {
+        const [settings, index] = await Promise.all([fetchSettings(), fetchTtsIndex()])
+        if (!active) return
+        const defaults: TtsVariantDraft = {
+          model: settings.ttsModel,
+          voice: settings.ttsVoice,
+          instructions: settings.ttsInstructions,
+        }
+        setTtsDefaults(defaults)
+        setTtsConfig(defaults)
+        setTtsIndex(index)
+      } catch {
+        // ignore
+      }
+    }
+    loadTtsConfig()
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (!id || summary?.status !== 'processing') return
@@ -339,6 +404,13 @@ export default function SummaryDetailView() {
     if (!summary?.videoId) return
     fetchVideoSummaries(summary.videoId).then(setVersions).catch(() => {})
   }, [summary?.videoId, id])
+
+  useEffect(() => {
+    if (!summary) return
+    setTtsConfig(ttsDefaults)
+    setTtsLoading(false)
+    setTtsError('')
+  }, [summary?.id, ttsDefaults])
 
   const { htmlParts, predictions } = useMemo(() => {
     if (!summary?.summary) return { htmlParts: [], predictions: [] }
@@ -382,6 +454,172 @@ export default function SummaryDetailView() {
     }
   }
 
+  function updateTtsModel(model: TtsModel) {
+    setTtsDraft(prev => {
+      const options = ttsVoiceOptions(model)
+      const nextVoice = options.includes(prev.voice) ? prev.voice : 'nova'
+      const nextInstructions = model === 'gpt-4o-mini-tts' ? prev.instructions : ''
+      return { ...prev, model, voice: nextVoice, instructions: nextInstructions }
+    })
+  }
+
+  function openTtsConfig() {
+    setTtsDraft(ttsConfig)
+    setTtsConfigOpen(true)
+  }
+
+  async function applyTtsConfigForSummary() {
+    const draft = { ...ttsDraft }
+    setTtsConfig(draft)
+    setTtsConfigOpen(false)
+    await handleTtsPlay(draft)
+  }
+
+  function findCachedVariantKey(summaryId: string, draft: TtsVariantDraft): string | null {
+    const summaryEntry = ttsIndex[summaryId]
+    if (!summaryEntry) return null
+    for (const [variantKey, variant] of Object.entries(summaryEntry.variants)) {
+      if (
+        variant.model === draft.model
+        && variant.voice === draft.voice
+        && normalizeInstructions(variant.instructions) === normalizeInstructions(draft.instructions)
+      ) {
+        return variantKey
+      }
+    }
+    return null
+  }
+
+  async function handleTtsPlay(configOverride?: TtsVariantDraft) {
+    if (!summary || summary.status !== 'done' || !summary.summary) return
+    const effectiveConfig = configOverride ?? ttsConfig
+    const cachedVariant = findCachedVariantKey(summary.id, effectiveConfig)
+    const isSameVariant = !!cachedVariant
+      && player.track?.summaryId === summary.id
+      && player.track.variantKey === cachedVariant
+
+    if (isSameVariant && player.isPlaying) {
+      player.pause()
+      return
+    }
+    if (isSameVariant && !player.isPlaying) {
+      await player.resume()
+      return
+    }
+    if (cachedVariant) {
+      setPendingCachedVariantKey(cachedVariant)
+      setPendingCachedConfig(effectiveConfig)
+      setTtsAlreadyExistsOpen(true)
+      return
+    }
+    setTtsError('')
+    setTtsLoading(true)
+    try {
+      const result = await generateTts({
+        summaryId: summary.id,
+        text: summary.summary,
+        model: effectiveConfig.model,
+        voice: effectiveConfig.voice,
+        instructions: effectiveConfig.instructions,
+      })
+      const refreshedIndex = await fetchTtsIndex()
+      setTtsIndex(refreshedIndex)
+      await player.playTrack(result.audioUrl, {
+        summaryId: summary.id,
+        variantKey: result.variantKey,
+        title: summary.videoTitle || 'Summary',
+        durationHintSeconds: result.durationSeconds,
+      })
+    } catch (e: any) {
+      setTtsError(e?.message ?? 'TTS fehlgeschlagen')
+    } finally {
+      setTtsLoading(false)
+    }
+  }
+
+  async function playPendingCachedVariant() {
+    if (!summary || !pendingCachedVariantKey) return
+    const variantKey = pendingCachedVariantKey
+    const chosenConfig = pendingCachedConfig
+    setTtsAlreadyExistsOpen(false)
+    setPendingCachedVariantKey(null)
+    setPendingCachedConfig(null)
+    if (chosenConfig) setTtsConfig(chosenConfig)
+    setTtsError('')
+    setTtsLoading(true)
+    try {
+      await player.playTrack(getTtsAudioUrl(summary.id, variantKey), {
+        summaryId: summary.id,
+        variantKey,
+        title: summary.videoTitle || 'Summary',
+        durationHintSeconds: ttsIndex[summary.id]?.variants?.[variantKey]?.durationSeconds ?? estimateDurationSecondsFromText(summary.summary ?? ''),
+      })
+    } catch (e: any) {
+      setTtsError(e?.message ?? 'TTS konnte nicht abgespielt werden')
+    } finally {
+      setTtsLoading(false)
+    }
+  }
+
+  async function handlePlayExistingVariant(variantKey: string) {
+    if (!summary || summary.status !== 'done') return
+    const isSameVariant = player.track?.summaryId === summary.id && player.track.variantKey === variantKey
+    if (isSameVariant && player.isPlaying) {
+      player.pause()
+      return
+    }
+    if (isSameVariant && !player.isPlaying) {
+      await player.resume()
+      return
+    }
+    setTtsError('')
+    setTtsLoading(true)
+    try {
+      await player.playTrack(getTtsAudioUrl(summary.id, variantKey), {
+        summaryId: summary.id,
+        variantKey,
+        title: summary.videoTitle || 'Summary',
+        durationHintSeconds: ttsIndex[summary.id]?.variants?.[variantKey]?.durationSeconds ?? estimateDurationSecondsFromText(summary.summary ?? ''),
+      })
+      const variant = ttsIndex[summary.id]?.variants?.[variantKey]
+      if (variant) {
+        setTtsConfig({
+          model: variant.model as TtsModel,
+          voice: variant.voice as TtsVoice,
+          instructions: variant.instructions,
+        })
+      }
+    } catch (e: any) {
+      setTtsError(e?.message ?? 'TTS konnte nicht abgespielt werden')
+    } finally {
+      setTtsLoading(false)
+    }
+  }
+
+  async function handleTtsSendToTelegram(configOverride?: TtsVariantDraft) {
+    if (!summary || summary.status !== 'done' || !summary.summary) return
+    const effectiveConfig = configOverride ?? ttsConfig
+    setTtsError('')
+    setTtsLoading(true)
+    try {
+      await generateTts({
+        summaryId: summary.id,
+        text: summary.summary,
+        model: effectiveConfig.model,
+        voice: effectiveConfig.voice,
+        instructions: effectiveConfig.instructions,
+        sendToTelegram: true,
+      })
+      const refreshedIndex = await fetchTtsIndex()
+      setTtsIndex(refreshedIndex)
+      addToast('TTS an Telegram gesendet', 'success', 3000)
+    } catch (e: any) {
+      setTtsError(e?.message ?? 'TTS konnte nicht an Telegram gesendet werden')
+    } finally {
+      setTtsLoading(false)
+    }
+  }
+
   const versionsByModel = useMemo(() => {
     const map = new Map<string, SummaryListItem>()
     for (const v of versions) {
@@ -398,6 +636,35 @@ export default function SummaryDetailView() {
     }
     return set
   }, [versionsByModel])
+
+  const hasCachedVariant = useMemo(() => {
+    if (!summary) return false
+    return !!findCachedVariantKey(summary.id, ttsConfig)
+  }, [summary?.id, ttsConfig, ttsIndex])
+
+  const summaryCharCount = useMemo(() => (summary?.summary ?? '').length, [summary?.summary])
+  const summaryWordCount = useMemo(() => (summary?.summary ?? '').trim().split(/\s+/).filter(Boolean).length, [summary?.summary])
+
+  const availableTtsVariants = useMemo(() => {
+    if (!summary) return [] as { variantKey: string; model: TtsModel; voice: TtsVoice; instructions: string; createdAt: string }[]
+    const variants = ttsIndex[summary.id]?.variants ?? {}
+    return Object.entries(variants)
+      .map(([variantKey, value]) => ({
+        variantKey,
+        model: value.model as TtsModel,
+        voice: value.voice as TtsVoice,
+        instructions: value.instructions,
+        createdAt: value.createdAt,
+      }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }, [summary?.id, ttsIndex])
+
+  const ttsState = useMemo<'idle' | 'loading' | 'playing' | 'paused'>(() => {
+    if (ttsLoading) return 'loading'
+    if (!summary) return 'idle'
+    if (player.track?.summaryId !== summary.id) return 'idle'
+    return player.isPlaying ? 'playing' : 'paused'
+  }, [ttsLoading, summary?.id, player.track?.summaryId, player.isPlaying])
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
   if (!summary) return <div className="text-center py-20 text-slate-500">Nicht gefunden</div>
@@ -421,9 +688,17 @@ export default function SummaryDetailView() {
                 {summary.author && !/^(nicht angegeben|unbekannt|unknown|n\/a|-|–)$/i.test(summary.author.trim()) && summary.author !== summary.channelName && <span className="text-white/60"> · {summary.author}</span>}
               </p>
               {summary.model && (
-                <span className="inline-flex mt-2 text-[11px] font-medium px-2 py-0.5 rounded-full border text-violet-100 border-violet-200/60 bg-violet-500/30">
-                  {modelShortLabel(summary.model)}
-                </span>
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                  <span className="inline-flex text-[11px] font-medium px-2 py-0.5 rounded-full border text-violet-100 border-violet-200/60 bg-violet-500/30">
+                    {modelShortLabel(summary.model)}
+                  </span>
+                  <span className="inline-flex text-[11px] font-medium px-2 py-0.5 rounded-full border text-white/90 border-white/40 bg-black/30">
+                    {summaryCharCount.toLocaleString('de-DE')} Chars
+                  </span>
+                  <span className="inline-flex text-[11px] font-medium px-2 py-0.5 rounded-full border text-white/90 border-white/40 bg-black/30">
+                    {summaryWordCount.toLocaleString('de-DE')} Wörter
+                  </span>
+                </div>
               )}
             </div>
           </div>
@@ -453,6 +728,61 @@ export default function SummaryDetailView() {
             ))}
           </div>
           <div className="flex items-center gap-2">
+            {summary.status === 'done' && (
+              <>
+                <button
+                  onClick={() => { void handleTtsPlay() }}
+                  disabled={ttsState === 'loading'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
+                  title={hasCachedVariant ? 'TTS abspielen (gecached)' : 'TTS erzeugen und abspielen'}
+                >
+                  {ttsState === 'loading'
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : ttsState === 'playing'
+                      ? <Pause className="w-3.5 h-3.5" />
+                      : ttsState === 'paused'
+                        ? <Play className="w-3.5 h-3.5" />
+                        : <Volume2 className="w-3.5 h-3.5" />}
+                  TTS
+                  {hasCachedVariant ? <span className="w-2 h-2 rounded-full bg-emerald-500" /> : null}
+                </button>
+                <button
+                  onClick={openTtsConfig}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg transition-colors"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" /> TTS Config
+                </button>
+                <button
+                  onClick={() => { void handleTtsSendToTelegram() }}
+                  disabled={ttsState === 'loading'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
+                  title="TTS erzeugen und an Telegram senden"
+                >
+                  {ttsState === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  TTS
+                </button>
+                {availableTtsVariants.map(variant => {
+                  const isActive = player.track?.summaryId === summary.id && player.track.variantKey === variant.variantKey
+                  return (
+                    <button
+                      key={variant.variantKey}
+                      onClick={() => handlePlayExistingVariant(variant.variantKey)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm border rounded-lg transition-colors ${
+                        isActive
+                          ? 'border-primary text-primary bg-primary/10'
+                          : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                      title={`${variant.model} · ${variant.voice}`}
+                    >
+                      {isActive
+                        ? (player.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />)
+                        : <Play className="w-3.5 h-3.5" />}
+                      {ttsModelShortLabel(variant.model)} · {variant.voice}
+                    </button>
+                  )
+                })}
+              </>
+            )}
             <a href={summary.videoUrl} target="_blank" rel="noopener" className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg transition-colors">
               <ExternalLink className="w-3.5 h-3.5" /> YouTube
             </a>
@@ -461,6 +791,9 @@ export default function SummaryDetailView() {
             </button>
           </div>
         </div>
+        {ttsError && summary.status === 'done' && (
+          <div className="px-5 pb-1 text-xs text-danger">{ttsError}</div>
+        )}
 
         <div className="p-5">
           {summary.status === 'processing' && (
@@ -593,6 +926,98 @@ export default function SummaryDetailView() {
         confirmLabel="Löschen"
         variant="danger"
       />
+
+      <Modal
+        open={ttsConfigOpen}
+        onClose={() => setTtsConfigOpen(false)}
+        title="TTS Config"
+        description={summary?.videoTitle || 'Nur für diese Summary. Globale Defaults bleiben unverändert.'}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-800 mb-1">Modell</label>
+            <select
+              value={ttsDraft.model}
+              onChange={e => updateTtsModel(e.target.value as TtsModel)}
+              className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+            >
+              <option value="tts-1">tts-1</option>
+              <option value="tts-1-hd">tts-1-hd</option>
+              <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-800 mb-1">Stimme</label>
+            <select
+              value={ttsDraft.voice}
+              onChange={e => setTtsDraft(prev => ({ ...prev, voice: e.target.value as TtsVoice }))}
+              className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+            >
+              {ttsVoiceOptions(ttsDraft.model).map(voice => {
+                const recommended = ttsDraft.model === 'gpt-4o-mini-tts' && (voice === 'marin' || voice === 'cedar')
+                return <option key={voice} value={voice}>{recommended ? `${voice} - ★ Empfohlen` : voice}</option>
+              })}
+            </select>
+          </div>
+          {ttsDraft.model === 'gpt-4o-mini-tts' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-800 mb-1">Instruktionen</label>
+              <input
+                type="text"
+                value={ttsDraft.instructions}
+                onChange={e => setTtsDraft(prev => ({ ...prev, instructions: e.target.value }))}
+                placeholder={'z.B. "Speak slowly and clearly in German"'}
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+              />
+            </div>
+          )}
+        </div>
+        <ModalFooter>
+          <button
+            onClick={() => setTtsConfigOpen(false)}
+            className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Abbrechen
+          </button>
+          <button
+            onClick={applyTtsConfigForSummary}
+            disabled={ttsLoading}
+            className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            TTS
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        open={ttsAlreadyExistsOpen}
+        onClose={() => {
+          setTtsAlreadyExistsOpen(false)
+          setPendingCachedVariantKey(null)
+          setPendingCachedConfig(null)
+        }}
+        title="TTS schon vorhanden"
+        description="Für die gewählten Einstellungen existiert bereits ein TTS. Willst du dieses jetzt abspielen?"
+      >
+        <ModalFooter>
+          <button
+            onClick={() => {
+              setTtsAlreadyExistsOpen(false)
+              setPendingCachedVariantKey(null)
+              setPendingCachedConfig(null)
+            }}
+            className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Abbrechen
+          </button>
+          <button
+            onClick={() => { void playPendingCachedVariant() }}
+            className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            Play
+          </button>
+        </ModalFooter>
+      </Modal>
 
       <Modal
         open={modelModalOpen}

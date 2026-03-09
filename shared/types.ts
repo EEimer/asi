@@ -67,7 +67,55 @@ export interface Prediction {
   createdAt: string
 }
 
-export type ProcessingStep = 'queued' | 'metadata' | 'transcript' | 'summarizing' | 'done' | 'error'
+export type TtsModel = 'tts-1' | 'tts-1-hd' | 'gpt-4o-mini-tts'
+
+export type TtsVoiceClassic = 'alloy' | 'ash' | 'coral' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer'
+export type TtsVoiceExtended = 'ballad' | 'verse' | 'marin' | 'cedar'
+export type TtsVoice = TtsVoiceClassic | TtsVoiceExtended
+
+export interface TtsVariantConfig {
+  model: TtsModel
+  voice: TtsVoice
+  instructions: string
+}
+
+export interface TtsVariantIndexEntry extends TtsVariantConfig {
+  filePath: string
+  createdAt: string
+  sizeBytes: number
+  durationSeconds?: number
+}
+
+export interface TtsSummaryIndexEntry {
+  lastUsedVariantKey?: string
+  variants: Record<string, TtsVariantIndexEntry>
+}
+
+export type TtsIndex = Record<string, TtsSummaryIndexEntry>
+
+export interface TtsGenerateResponse {
+  cached: boolean
+  audioUrl: string
+  summaryId: string
+  variantKey: string
+  model: TtsModel
+  voice: TtsVoice
+  instructions: string
+  createdAt: string
+  durationSeconds?: number
+}
+
+export type ProcessingStep =
+  | 'queued'
+  | 'metadata'
+  | 'transcript'
+  | 'summarizing'
+  | 'done'
+  | 'error'
+  | 'tts_generating'
+  | 'tts_cached'
+  | 'tts_done'
+  | 'tts_error'
 
 export interface ProcessingEvent {
   summaryId: string
@@ -83,6 +131,9 @@ export interface Settings {
   cookieBrowser: string
   openaiModel: string
   blockedChannels: string[]
+  ttsModel: TtsModel
+  ttsVoice: TtsVoice
+  ttsInstructions: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -134,4 +185,7 @@ Transkript:
   cookieBrowser: 'brave',
   openaiModel: 'gpt-4o',
   blockedChannels: [],
+  ttsModel: 'tts-1-hd',
+  ttsVoice: 'nova',
+  ttsInstructions: '',
 }

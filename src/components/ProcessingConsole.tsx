@@ -1,10 +1,19 @@
 import { useEffect, useState, useRef } from 'react'
-import { ChevronUp, ChevronDown, Terminal, Loader2, Check, AlertCircle, Sparkles, FileText, Download } from 'lucide-react'
+import { ChevronUp, ChevronDown, Terminal, Loader2, Check, AlertCircle, Sparkles, FileText, Download, Volume2 } from 'lucide-react'
 import type { ProcessingEvent, ProcessingStep } from '../../shared/types'
 import { useToast } from '../store/toastStore'
 
 const stepIcons: Record<ProcessingStep, typeof Check> = {
-  queued: Download, metadata: Download, transcript: FileText, summarizing: Sparkles, done: Check, error: AlertCircle,
+  queued: Download,
+  metadata: Download,
+  transcript: FileText,
+  summarizing: Sparkles,
+  done: Check,
+  error: AlertCircle,
+  tts_generating: Volume2,
+  tts_cached: Check,
+  tts_done: Check,
+  tts_error: AlertCircle,
 }
 
 const stepColors: Record<ProcessingStep, string> = {
@@ -14,6 +23,10 @@ const stepColors: Record<ProcessingStep, string> = {
   summarizing: 'text-purple-500',
   done: 'text-emerald-500',
   error: 'text-rose-500',
+  tts_generating: 'text-indigo-500',
+  tts_cached: 'text-teal-500',
+  tts_done: 'text-emerald-500',
+  tts_error: 'text-rose-500',
 }
 
 export default function ProcessingConsole() {
@@ -74,14 +87,14 @@ export default function ProcessingConsole() {
 
   const activeJobs = new Set<string>()
   for (const e of events) {
-    if (e.step === 'done' || e.step === 'error') activeJobs.delete(e.summaryId)
+    if (e.step === 'done' || e.step === 'error' || e.step === 'tts_done' || e.step === 'tts_cached' || e.step === 'tts_error') activeJobs.delete(e.summaryId)
     else activeJobs.add(e.summaryId)
   }
   const isActive = activeJobs.size > 0
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-30">
-      <div className="mx-auto max-w-5xl px-4">
+      <div className="mx-auto max-w-7xl px-4">
         <div className="bg-white border border-b-0 border-slate-200 rounded-t-xl shadow-lg overflow-hidden">
           <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2">
@@ -99,7 +112,7 @@ export default function ProcessingConsole() {
               {events.length === 0 && <p className="text-slate-400 p-4 text-center">Noch keine Events. Fasse ein Video zusammen um hier den Fortschritt zu sehen.</p>}
               {events.map((e, i) => {
                 const Icon = stepIcons[e.step]
-                const spinning = e.step !== 'done' && e.step !== 'error'
+                const spinning = !['done', 'error', 'tts_done', 'tts_cached', 'tts_error'].includes(e.step)
                 return (
                   <div key={i} className="flex items-start gap-2 px-4 py-1.5 border-b border-slate-100/50 hover:bg-slate-100/50">
                     <span className="text-[10px] text-slate-400 shrink-0 mt-0.5 tabular-nums">{new Date(e.timestamp).toLocaleTimeString('de-DE')}</span>
