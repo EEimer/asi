@@ -10,6 +10,22 @@ import { useAudioPlayer } from '../store/audioPlayerStore'
 const PAGE_SIZE = 30
 type PendingTtsMode = 'play' | 'telegram'
 
+function Clock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const date = now.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
+  return (
+    <div className="fixed bottom-4 left-4 text-right leading-tight pointer-events-none select-none z-10">
+      <div className="text-xs font-mono text-slate-400">{time}</div>
+      <div className="text-[10px] text-slate-300">{date}</div>
+    </div>
+  )
+}
+
 export default function BrowseView() {
   const navigate = useNavigate()
   const [videos, setVideos] = useState<YouTubeVideo[]>([])
@@ -470,6 +486,7 @@ export default function BrowseView() {
         </>
       )}
 
+      <Clock />
       <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
         <p className="text-sm text-slate-500 mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
         <input

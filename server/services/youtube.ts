@@ -1,7 +1,42 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import type { YouTubeVideo } from '../../shared/types'
 import { loadSettings } from '../config'
+
+const YT_DLP = (() => {
+  const candidates = [
+    process.env.YT_DLP_PATH,
+    `${process.env.HOME}/Library/Python/3.14/bin/yt-dlp`,
+    `${process.env.HOME}/Library/Python/3.13/bin/yt-dlp`,
+    '/opt/homebrew/bin/yt-dlp',
+    '/usr/local/bin/yt-dlp',
+  ].filter(Boolean) as string[]
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+  return 'yt-dlp'
+})()
+
+const DENO_BIN = (() => {
+  const candidates = [
+    `${process.env.HOME}/.deno/bin/deno`,
+    '/usr/local/bin/deno',
+    '/opt/homebrew/bin/deno',
+  ]
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+  return null
+})()
+
+function ytdlpBaseArgs(): string[] {
+  const args: string[] = []
+  if (DENO_BIN) {
+    args.push('--js-runtimes', `deno:${DENO_BIN}`, '--remote-components', 'ejs:github')
+  }
+  args.push('--impersonate', 'chrome-136')
+  return args
+}
 
 function cookieArgs(): string[] {
   const { cookieBrowser } = loadSettings()
@@ -45,7 +80,7 @@ async function fetchOembedMeta(videoId: string): Promise<{ title: string; channe
 
 async function refreshFeedCache(targetCount: number) {
   const proc = Bun.spawn(
-    ['yt-dlp', '--flat-playlist', '--dump-json', ...cookieArgs(), '--playlist-end', String(targetCount), ':ytsubs'],
+    [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', ...cookieArgs(), '--playlist-end', String(targetCount), ':ytsubs'],
     { stdout: 'pipe', stderr: 'pipe' },
   )
 
@@ -127,7 +162,7 @@ export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string;
   const oembed = await fetchOembedMeta(videoId)
 
   const proc = Bun.spawn(
-    ['yt-dlp', '--dump-json', '--skip-download', ...cookieArgs(), videoUrl],
+    [YT_DLP, ...ytdlpBaseArgs(), '--dump-json', '--skip-download', ...cookieArgs(), videoUrl],
     { stdout: 'pipe', stderr: 'pipe' },
   )
 
@@ -170,7 +205,7 @@ export async function downloadSubtitles(videoUrl: string, lang: string): Promise
     for (const extraArgs of cookieStrategies) {
       for (const flag of ['--write-auto-sub', '--write-sub']) {
         const proc = Bun.spawn(
-          ['yt-dlp', flag, '--sub-lang', tryLang, '--skip-download', '--sub-format', 'srt/vtt', ...extraArgs, '-o', `${tmpDir}/%(id)s.%(ext)s`, videoUrl],
+          [YT_DLP, ...ytdlpBaseArgs(), flag, '--sub-lang', tryLang, '--skip-download', ...extraArgs, '-o', `${tmpDir}/%(id)s.%(ext)s`, videoUrl],
           { stdout: 'pipe', stderr: 'pipe' },
         )
         await proc.exited

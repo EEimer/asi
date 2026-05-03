@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions, fetchSettings, fetchTtsIndex, generateTts, getTtsAudioUrl } from '../api/endpoints'
+import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions, fetchSettings, fetchTtsIndex, generateTts, getTtsAudioUrl, fetchSummaries } from '../api/endpoints'
 import type { Summary, SummaryListItem, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
-import { ArrowLeft, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
@@ -331,6 +331,7 @@ export default function SummaryDetailView() {
   const [editingAuthor, setEditingAuthor] = useState(false)
   const [authorDraft, setAuthorDraft] = useState('')
   const [versions, setVersions] = useState<SummaryListItem[]>([])
+  const [summaryOrder, setSummaryOrder] = useState<SummaryListItem[]>([])
   const [modelModalOpen, setModelModalOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState('gpt-4o')
   const [creatingModelSummary, setCreatingModelSummary] = useState(false)
@@ -404,6 +405,14 @@ export default function SummaryDetailView() {
     if (!summary?.videoId) return
     fetchVideoSummaries(summary.videoId).then(setVersions).catch(() => {})
   }, [summary?.videoId, id])
+
+  useEffect(() => {
+    let active = true
+    fetchSummaries().then(items => {
+      if (active) setSummaryOrder(items)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [id])
 
   useEffect(() => {
     if (!summary) return
@@ -666,14 +675,37 @@ export default function SummaryDetailView() {
     return player.isPlaying ? 'playing' : 'paused'
   }, [ttsLoading, summary?.id, player.track?.summaryId, player.isPlaying])
 
+  const { previousSummaryId, nextSummaryId } = useMemo(() => {
+    if (!id || !summaryOrder.length) return { previousSummaryId: null as string | null, nextSummaryId: null as string | null }
+    const currentIndex = summaryOrder.findIndex(item => item.id === id)
+    if (currentIndex < 0) return { previousSummaryId: null, nextSummaryId: null }
+    return {
+      previousSummaryId: summaryOrder[currentIndex - 1]?.id ?? null,
+      nextSummaryId: summaryOrder[currentIndex + 1]?.id ?? null,
+    }
+  }, [id, summaryOrder])
+
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
   if (!summary) return <div className="text-center py-20 text-slate-500">Nicht gefunden</div>
 
   return (
     <div>
-      <button onClick={() => navigate('/summaries')} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-4 transition-colors">
-        <ArrowLeft className="w-4 h-4" /> Zurück
-      </button>
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={() => previousSummaryId && navigate(`/summaries/${previousSummaryId}`)}
+          disabled={!previousSummaryId}
+          className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ArrowLeft className="w-4 h-4" /> Vorheriger
+        </button>
+        <button
+          onClick={() => nextSummaryId && navigate(`/summaries/${nextSummaryId}`)}
+          disabled={!nextSummaryId}
+          className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Nächster <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {summary.thumbnailUrl && (

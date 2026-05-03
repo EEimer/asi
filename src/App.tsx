@@ -15,7 +15,7 @@ const navItems = [
   { to: '/summaries', label: 'Zusammenfassungen', icon: FileText },
   { to: '/glaskugel', label: 'Glaskugel', icon: Gem },
   { to: '/notes', label: 'Notizen', icon: StickyNote },
-  { to: '/settings', label: 'Settings', icon: Settings },
+{ to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export default function App() {
@@ -52,7 +52,7 @@ export default function App() {
           <Route path="/summaries/:id" element={<SummaryDetailView />} />
           <Route path="/glaskugel" element={<GlaskugelView />} />
           <Route path="/notes" element={<NotesView />} />
-          <Route path="/settings" element={<SettingsView />} />
+<Route path="/settings" element={<SettingsView />} />
         </Routes>
       </main>
       <ProcessingConsole />
