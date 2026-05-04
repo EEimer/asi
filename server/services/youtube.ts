@@ -3,6 +3,42 @@ import { join } from 'path'
 import type { YouTubeVideo } from '../../shared/types'
 import { loadSettings } from '../config'
 
+const COOKIE_BROWSER_PATHS: Record<string, string[]> = {
+  chrome: [
+    '/Applications/Google Chrome.app',
+    `${process.env.HOME}/Applications/Google Chrome.app`,
+  ],
+  safari: [
+    '/Applications/Safari.app',
+    `${process.env.HOME}/Applications/Safari.app`,
+  ],
+  firefox: [
+    '/Applications/Firefox.app',
+    `${process.env.HOME}/Applications/Firefox.app`,
+  ],
+  edge: [
+    '/Applications/Microsoft Edge.app',
+    `${process.env.HOME}/Applications/Microsoft Edge.app`,
+  ],
+  brave: [
+    '/Applications/Brave Browser.app',
+    `${process.env.HOME}/Applications/Brave Browser.app`,
+  ],
+}
+
+function isBrowserInstalled(browser: string): boolean {
+  return (COOKIE_BROWSER_PATHS[browser] ?? []).some(path => existsSync(path))
+}
+
+function resolveCookieBrowser(): string | null {
+  const { cookieBrowser } = loadSettings()
+  if (cookieBrowser && isBrowserInstalled(cookieBrowser)) return cookieBrowser
+  for (const browser of Object.keys(COOKIE_BROWSER_PATHS)) {
+    if (isBrowserInstalled(browser)) return browser
+  }
+  return null
+}
+
 const YT_DLP = (() => {
   const candidates = [
     process.env.YT_DLP_PATH,
@@ -38,9 +74,9 @@ function ytdlpBaseArgs(): string[] {
   return args
 }
 
-function cookieArgs(): string[] {
-  const { cookieBrowser } = loadSettings()
-  return ['--cookies-from-browser', cookieBrowser]
+function cookieArgs(browser: string): string[] {
+  if (!isBrowserInstalled(browser)) return []
+  return ['--cookies-from-browser', browser]
 }
 
 export function extractVideoId(url: string): string {
@@ -53,15 +89,6 @@ let feedFetchedAt = 0
 let feedFetching: Promise<void> | null = null
 let feedExhausted = false
 const FEED_TTL_MS = 5 * 60 * 1000
-
-async function fetchChannelName(videoId: string): Promise<string> {
-  try {
-    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
-    if (!res.ok) return ''
-    const data = await res.json() as any
-    return data.author_name ?? ''
-  } catch { return '' }
-}
 
 async function fetchOembedMeta(videoId: string): Promise<{ title: string; channel: string; thumbnail: string }> {
   try {
@@ -78,75 +105,167 @@ async function fetchOembedMeta(videoId: string): Promise<{ title: string; channe
   }
 }
 
-async function refreshFeedCache(targetCount: number) {
-  const proc = Bun.spawn(
-    [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', ...cookieArgs(), '--playlist-end', String(targetCount), ':ytsubs'],
-    { stdout: 'pipe', stderr: 'pipe' },
-  )
+async function fetchChannelIds(): Promise<{ id: string; name: string; url: string }[]> {
+  const settings = loadSettings()
+  const candidates = [settings.cookieBrowser, ...Object.keys(COOKIE_BROWSER_PATHS)]
+    .filter((value, index, self) => typeof value === 'string' && self.indexOf(value) === index)
+    .filter(browser => isBrowserInstalled(browser)) as string[]
 
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
+  if (!candidates.length) {
+    throw new Error('Kein installierter Browser mit YouTube-Cookies gefunden. Bitte wähle in den Einstellungen einen installierten Browser wie Chrome, Safari, Firefox oder Edge aus.')
+  }
 
-  if (proc.exitCode !== 0) throw new Error(`yt-dlp feed error: ${stderr.slice(0, 500)}`)
+  let lastError: string | null = null
+  for (const browser of candidates) {
+    const browserArgs = cookieArgs(browser)
+    if (browserArgs.length === 0) continue
 
-  const lines = stdout.split('\n').filter(line => line.trim())
-  const fetchedEntryCount = lines.length
+    const proc = Bun.spawn(
+      [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', '--skip-download', ...browserArgs, 'https://www.youtube.com/feed/channels'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+    const killTimer = setTimeout(() => proc.kill(), 30_000)
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    clearTimeout(killTimer)
+
+    if (proc.exitCode !== 0) {
+      lastError = `browser=${browser} error=${stderr.slice(0, 500)}`
+      continue
+    }
+
+    const channels: { id: string; name: string; url: string }[] = []
+    const seen = new Set<string>()
+    for (const line of stdout.split('\n').filter(l => l.trim())) {
+      try {
+        const j = JSON.parse(line)
+        const id = j.channel_id ?? j.id ?? ''
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        channels.push({ id, name: j.channel ?? j.title ?? '', url: j.channel_url ?? j.url ?? '' })
+      } catch {}
+    }
+    if (channels.length) return channels
+    lastError = `browser=${browser} no channels found`
+  }
+
+  throw new Error(`yt-dlp subs error: ${lastError ?? 'kein lauffähiger Browser gefunden'}`)
+}
+
+async function fetchRssFeed(channelId: string, channelName: string, channelUrl: string): Promise<YouTubeVideo[]> {
+  try {
+    const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`)
+    if (!res.ok) return []
+    const xml = await res.text()
+    const entries: YouTubeVideo[] = []
+    const entryBlocks = xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? []
+    for (const block of entryBlocks) {
+      const id = block.match(/<yt:videoId>([^<]+)<\/yt:videoId>/)?.[1] ?? ''
+      if (!id) continue
+      const title = block.match(/<title>([^<]+)<\/title>/)?.[1] ?? 'Untitled'
+      const published = block.match(/<published>([^<]+)<\/published>/)?.[1] ?? ''
+      const thumbnail = block.match(/url="([^"]+)"[^/]*\/>/)?.[1] ?? `https://img.youtube.com/vi/${id}/hqdefault.jpg`
+      const publishedAt = published ? Math.floor(new Date(published).getTime() / 1000) : undefined
+      const uploadDate = published ? formatUploadDate(published.slice(0, 10).replace(/-/g, '')) : ''
+      entries.push({
+        id,
+        title: title.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"),
+        channel: channelName,
+        channelUrl,
+        thumbnail,
+        duration: 0,
+        durationFormatted: '',
+        uploadDate,
+        publishedAt,
+        url: `https://www.youtube.com/watch?v=${id}`,
+      })
+    }
+    return entries
+  } catch { return [] }
+}
+
+async function fetchDurationMap(browserArgs: string[]): Promise<{ durations: Map<string, { duration: number; durationFormatted: string }>; shortIds: Set<string> }> {
+  const durations = new Map<string, { duration: number; durationFormatted: string }>()
+  const shortIds = new Set<string>()
+  try {
+    const proc = Bun.spawn(
+      [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', '--skip-download', ...browserArgs, '--playlist-end', '200', ':ytsubs'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+    const killTimer = setTimeout(() => proc.kill(), 30_000)
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    clearTimeout(killTimer)
+    for (const line of stdout.split('\n').filter(l => l.trim())) {
+      try {
+        const j = JSON.parse(line)
+        if (!j.id) continue
+        const isShort = (j.url ?? j.webpage_url ?? '').includes('/shorts/') || (j.duration > 0 && j.duration <= 60)
+        if (isShort) { shortIds.add(j.id); continue }
+        if (j.duration) durations.set(j.id, { duration: j.duration, durationFormatted: j.duration_string ?? formatDuration(j.duration) })
+      } catch {}
+    }
+  } catch {}
+  return { durations, shortIds }
+}
+
+async function refreshFeedCache(_targetCount: number) {
+  const settings = loadSettings()
+  const browser = (() => {
+    const candidates = [settings.cookieBrowser, ...Object.keys(COOKIE_BROWSER_PATHS)]
+      .filter((v, i, s) => typeof v === 'string' && s.indexOf(v) === i)
+      .filter(b => isBrowserInstalled(b)) as string[]
+    return candidates[0] ?? null
+  })()
+  const browserArgs = browser ? cookieArgs(browser) : []
+
+  const [channels, { durations: durationMap, shortIds }] = await Promise.all([
+    fetchChannelIds(),
+    browserArgs.length ? fetchDurationMap(browserArgs) : Promise.resolve({ durations: new Map(), shortIds: new Set<string>() }),
+  ])
+  if (!channels.length) throw new Error('No subscribed channels found')
+
+  const BATCH = 20
+  const allVideos: YouTubeVideo[] = []
+  for (let i = 0; i < channels.length; i += BATCH) {
+    const batch = channels.slice(i, i + BATCH)
+    const results = await Promise.all(batch.map(c => fetchRssFeed(c.id, c.name, c.url)))
+    for (const vids of results) allVideos.push(...vids)
+  }
 
   const seen = new Set<string>()
   const videos: YouTubeVideo[] = []
-  for (const line of lines) {
-    try {
-      const j = JSON.parse(line)
-      const id = j.id ?? ''
-      if (seen.has(id)) continue
-      const liveStatus = j.live_status ?? ''
-      if (liveStatus === 'is_upcoming' || liveStatus === 'is_live' || liveStatus === 'post_live') continue
-      if (!j.duration && j.live_status !== 'was_live') continue
-      seen.add(id)
-      videos.push({
-        id,
-        title: j.title ?? 'Untitled',
-        channel: j.channel ?? j.uploader ?? '',
-        channelUrl: j.channel_url ?? j.uploader_url ?? '',
-        thumbnail: j.thumbnails?.at(-1)?.url ?? `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
-        duration: j.duration ?? 0,
-        durationFormatted: formatDuration(j.duration ?? 0),
-        uploadDate: formatUploadDate(j.upload_date ?? ''),
-        url: j.url ? `https://www.youtube.com/watch?v=${id}` : j.webpage_url ?? '',
-      })
-    } catch {}
+  for (const v of allVideos) {
+    if (seen.has(v.id)) continue
+    seen.add(v.id)
+    if (shortIds.has(v.id)) continue
+    const dur = durationMap.get(v.id)
+    if (dur) { v.duration = dur.duration; v.durationFormatted = dur.durationFormatted }
+    if (v.duration <= 60) continue
+    videos.push(v)
   }
-
-  // Fetch channel names via oEmbed (parallel, fast)
-  const needsChannel = videos.filter(v => !v.channel)
-  if (needsChannel.length) {
-    const results = await Promise.all(needsChannel.map(v => fetchChannelName(v.id)))
-    needsChannel.forEach((v, i) => { if (results[i]) v.channel = results[i] })
-  }
+  videos.sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
 
   feedCache = videos
   feedFetchedAt = Date.now()
-  // Exhaustion must be based on fetched playlist entries, not filtered videos.
-  // We skip live/upcoming/duplicates, so valid video count can be < targetCount
-  // even when there are more entries available beyond `targetCount`.
-  feedExhausted = fetchedEntryCount < targetCount
+  feedExhausted = true
 }
 
 export async function fetchSubscriptionFeed(offset = 0, limit = 30): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
-  const needed = offset + limit
   const cacheStale = Date.now() - feedFetchedAt > FEED_TTL_MS
 
-  if (feedCache.length < needed || (cacheStale && offset === 0)) {
+  if (feedCache.length === 0 || (cacheStale && offset === 0)) {
     if (!feedFetching) {
-      const target = Math.max(needed, feedCache.length + 30)
-      feedFetching = refreshFeedCache(target).finally(() => { feedFetching = null })
+      feedFetching = refreshFeedCache(0).finally(() => { feedFetching = null })
     }
     await feedFetching
   }
 
   const slice = feedCache.slice(offset, offset + limit)
-  const hasMore = !feedExhausted || offset + limit < feedCache.length
+  const hasMore = offset + limit < feedCache.length
   return { videos: slice, total: feedCache.length, hasMore }
 }
 
@@ -161,8 +280,9 @@ export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string;
   const fallbackThumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
   const oembed = await fetchOembedMeta(videoId)
 
+  const browser = resolveCookieBrowser()
   const proc = Bun.spawn(
-    [YT_DLP, ...ytdlpBaseArgs(), '--dump-json', '--skip-download', ...cookieArgs(), videoUrl],
+    [YT_DLP, ...ytdlpBaseArgs(), '--dump-json', '--skip-download', ...(browser ? cookieArgs(browser) : []), videoUrl],
     { stdout: 'pipe', stderr: 'pipe' },
   )
 
@@ -195,12 +315,13 @@ export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string;
 
 export async function downloadSubtitles(videoUrl: string, lang: string): Promise<{ text: string; usedLang: string }> {
   const langs = [lang, ...(lang !== 'en' ? ['en'] : [])]
+  const browser = resolveCookieBrowser()
 
   for (const tryLang of langs) {
     const tmpDir = `/tmp/asi_subs_${Date.now()}_${tryLang}`
     mkdirSync(tmpDir, { recursive: true })
 
-    const cookieStrategies: string[][] = [cookieArgs(), []]
+    const cookieStrategies: string[][] = browser ? [cookieArgs(browser), []] : [[]]
 
     for (const extraArgs of cookieStrategies) {
       for (const flag of ['--write-auto-sub', '--write-sub']) {

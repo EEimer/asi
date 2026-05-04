@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, generateTts, fetchTtsIndex } from '../api/endpoints'
+import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, generateTts, fetchTtsIndex, fetchCustomPrompts } from '../api/endpoints'
+import type { CustomPrompt } from '../api/endpoints'
 import type { TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon, Play, Send, Check } from 'lucide-react'
+import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon, Play, Send, Check, Wand2 } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { useAudioPlayer } from '../store/audioPlayerStore'
@@ -10,21 +11,30 @@ import { useAudioPlayer } from '../store/audioPlayerStore'
 const PAGE_SIZE = 30
 type PendingTtsMode = 'play' | 'telegram'
 
-function Clock() {
-  const [now, setNow] = useState(() => new Date())
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(t)
-  }, [])
-  const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  const date = now.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
-  return (
-    <div className="fixed bottom-4 left-4 text-right leading-tight pointer-events-none select-none z-10">
-      <div className="text-xs font-mono text-slate-400">{time}</div>
-      <div className="text-[10px] text-slate-300">{date}</div>
-    </div>
-  )
+function timeAgo(ts: number): string {
+  const totalSeconds = Math.max(0, Math.floor(Date.now() / 1000 - ts))
+  const minutes = Math.floor(totalSeconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+  const weeks = Math.floor(days / 7)
+  const months = Math.floor(days / 30)
+  if (months >= 1) return `vor ${months} Monat${months > 1 ? 'en' : ''}`
+  if (weeks >= 1) return `vor ${weeks} Woche${weeks > 1 ? 'n' : ''}`
+  if (days >= 1) return `vor ${days} Tag${days > 1 ? 'en' : ''}`
+  if (hours >= 1) return `vor ${hours} Stunde${hours > 1 ? 'n' : ''}`
+  if (minutes >= 1) return `vor ${minutes} Minute${minutes > 1 ? 'n' : ''}`
+  return 'gerade eben'
 }
+
+const MODEL_OPTIONS = [
+  { value: 'gpt-4o', label: 'GPT-4o' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { value: 'claude-opus-4-1', label: 'Opus' },
+]
+
 
 export default function BrowseView() {
   const navigate = useNavigate()
@@ -42,6 +52,14 @@ export default function BrowseView() {
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [manualUrl, setManualUrl] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [customPromptModalOpen, setCustomPromptModalOpen] = useState(false)
+  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([])
+  const [customPromptsLoading, setCustomPromptsLoading] = useState(false)
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null)
+  const [customPromptUrl, setCustomPromptUrl] = useState('')
+  const [customPromptSubmitting, setCustomPromptSubmitting] = useState(false)
+  const [defaultModel, setDefaultModel] = useState('gpt-4o')
+  const [selectedModel, setSelectedModel] = useState('gpt-4o')
   const [channelFilterMode, setChannelFilterMode] = useState<'filtered' | 'all'>('filtered')
   const [ttsDefaults, setTtsDefaults] = useState<{ model: TtsModel; voice: TtsVoice; instructions: string }>({
     model: 'tts-1-hd',
@@ -107,6 +125,8 @@ export default function BrowseView() {
       .then(([s, index]) => {
         setTtsDefaults({ model: s.ttsModel, voice: s.ttsVoice, instructions: s.ttsInstructions })
         setTtsIndex(index)
+        setDefaultModel(s.openaiModel)
+        setSelectedModel(s.openaiModel)
       })
       .catch(() => {})
   }, [])
@@ -323,6 +343,47 @@ export default function BrowseView() {
     finally { setSubmitting(false) }
   }
 
+  async function openCustomPromptModal() {
+    setCustomPromptUrl('')
+    setSelectedPromptId(null)
+    setSelectedModel(defaultModel)
+    setCustomPromptModalOpen(true)
+    setCustomPromptsLoading(true)
+    try {
+      const prompts = await fetchCustomPrompts()
+      setCustomPrompts(prompts)
+      setSelectedPromptId(prompts[0]?.id ?? null)
+    } catch {}
+    finally { setCustomPromptsLoading(false) }
+  }
+
+  async function handleCustomPromptSubmit() {
+    const url = customPromptUrl.trim()
+    if (!url || !selectedPromptId) return
+    const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
+    if (!match) { alert('Kein gültiger YouTube Link'); return }
+    const videoId = match[1]
+    const prompt = customPrompts.find(p => p.id === selectedPromptId)
+    if (!prompt) return
+    setCustomPromptSubmitting(true)
+    try {
+      const result = await createSummary(url, undefined, undefined, selectedModel, prompt.text)
+      setProcessing(prev => new Map(prev).set(videoId, result.id))
+      setVideos(prev => {
+        if (prev.some(v => v.id === videoId)) return prev
+        return [{
+          id: videoId, title: 'Wird geladen...', channel: '', channelUrl: '',
+          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          duration: 0, durationFormatted: '', uploadDate: '', url,
+        }, ...prev]
+      })
+      setCustomPromptUrl('')
+      setSelectedPromptId(null)
+      setCustomPromptModalOpen(false)
+    } catch (e: any) { alert(`Fehler: ${e.message}`) }
+    finally { setCustomPromptSubmitting(false) }
+  }
+
   async function handleBlock(channel: string) {
     if (!channel) return
     try {
@@ -356,6 +417,9 @@ export default function BrowseView() {
           <button onClick={() => { setManualUrl(''); setLinkModalOpen(true) }} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors">
             <LinkIcon className="w-3.5 h-3.5" /> YouTube Link
           </button>
+          <button onClick={openCustomPromptModal} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 text-slate-600 bg-white rounded-lg hover:bg-slate-50 transition-colors">
+            <Wand2 className="w-3.5 h-3.5" /> Custom Prompt
+          </button>
           <button onClick={handleRefresh} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-40" title="Feed aktualisieren">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -372,7 +436,8 @@ export default function BrowseView() {
         <div className="flex flex-col items-center justify-center py-16">
           <AlertCircle className="w-10 h-10 text-danger mb-3" />
           <p className="text-sm text-slate-700 font-medium mb-1">Feed konnte nicht geladen werden</p>
-          <p className="text-xs text-slate-500 mb-4 max-w-md text-center">{error}</p>
+          <p className="text-xs text-slate-500 mb-2 max-w-md text-center">{error}</p>
+          <p className="text-xs text-slate-400 mb-4 max-w-md text-center">Prüfe in den Einstellungen den Cookie-Browser oder verwende einen direkten YouTube-Link.</p>
           <button onClick={() => loadFeed(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
             <RefreshCw className="w-3.5 h-3.5" /> Erneut versuchen
           </button>
@@ -400,13 +465,15 @@ export default function BrowseView() {
                       <img src={v.thumbnail} alt="" className="w-44 h-[100px] object-cover rounded-lg bg-slate-100" />
                       {v.durationFormatted && <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded">{v.durationFormatted}</span>}
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 flex flex-col justify-between">
                       <h3 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2">{v.title}</h3>
-                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                        {v.channel}
-                        {v.channel && <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
-                      </p>
-                      {v.uploadDate && <p className="text-xs text-slate-400 mt-0.5">{v.uploadDate}</p>}
+                      <div>
+                        <p className="text-xs text-slate-700 flex items-center gap-1.5">
+                          {v.channel}
+                          {v.channel && <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
+                        </p>
+                        {v.publishedAt && <p className="text-[10px] text-slate-600 mt-0.5">{timeAgo(v.publishedAt)} · {v.uploadDate}</p>}
+                      </div>
                     </div>
                     <div className="shrink-0 flex flex-col gap-1.5 items-stretch" onClick={e => e.stopPropagation()}>
                       {summaryId && !isProcessing ? (
@@ -486,7 +553,86 @@ export default function BrowseView() {
         </>
       )}
 
-      <Clock />
+      <Modal open={customPromptModalOpen} onClose={() => setCustomPromptModalOpen(false)} title="Mit Custom Prompt zusammenfassen">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">YouTube URL</label>
+            <input
+              type="text"
+              placeholder="https://www.youtube.com/watch?v=..."
+              value={customPromptUrl}
+              onChange={e => setCustomPromptUrl(e.target.value)}
+              autoFocus
+              onPaste={e => {
+                const text = e.clipboardData.getData('text').trim()
+                if (text.match(/(?:youtube\.com|youtu\.be)/)) {
+                  e.preventDefault()
+                  setCustomPromptUrl(text)
+                }
+              }}
+              className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Prompt auswählen</label>
+            {customPromptsLoading ? (
+              <div className="flex items-center gap-2 py-4 text-slate-400 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" /> Prompts laden...
+              </div>
+            ) : customPrompts.length === 0 ? (
+              <p className="text-sm text-slate-400 italic py-2">Keine Custom Prompts vorhanden. Zuerst in den Einstellungen anlegen.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {customPrompts.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPromptId(p.id)}
+                    className={`w-full text-left px-3 py-2 text-sm rounded-lg border transition-colors ${
+                      selectedPromptId === p.id
+                        ? 'bg-violet-50 border-violet-300 text-violet-800 font-medium'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    {p.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Modell</label>
+            <div className="flex flex-wrap gap-1.5">
+              {MODEL_OPTIONS.map(o => (
+                <button
+                  key={o.value}
+                  onClick={() => setSelectedModel(o.value)}
+                  className={`w-28 px-2 py-1.5 text-xs rounded-lg border transition-colors truncate ${
+                    selectedModel === o.value
+                      ? 'bg-slate-800 border-slate-800 text-white font-medium'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <ModalFooter>
+          <button onClick={() => setCustomPromptModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
+            Abbrechen
+          </button>
+          <button
+            onClick={handleCustomPromptSubmit}
+            disabled={customPromptSubmitting || !customPromptUrl.trim() || !selectedPromptId}
+            className="px-4 py-2 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {customPromptSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+            Zusammenfassen
+          </button>
+        </ModalFooter>
+      </Modal>
+
       <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
         <p className="text-sm text-slate-500 mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
         <input

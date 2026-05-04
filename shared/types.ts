@@ -7,6 +7,7 @@ export interface YouTubeVideo {
   duration: number
   durationFormatted: string
   uploadDate: string
+  publishedAt?: number
   url: string
   alreadySummarized?: boolean
   summaryId?: string | null

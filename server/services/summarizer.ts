@@ -122,10 +122,12 @@ export async function summarizeTranscript(
   model: string,
   onProgress?: ProgressCallback,
   context?: TranscriptContext,
+  promptOverride?: string,
 ): Promise<string> {
   const settings = loadSettings()
   const wordCount = countWords(transcript)
-  const promptText = settings.summaryPrompt.replace(/Transkript:\s*$/, '').trim()
+  const rawPrompt = promptOverride ?? settings.summaryPrompt
+  const promptText = rawPrompt.replace(/Transkript:\s*$/, '').trim()
 
   const metaHeader = [
     context?.title && `Videotitel: ${context.title}`,

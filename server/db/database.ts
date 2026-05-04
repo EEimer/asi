@@ -51,6 +51,16 @@ db.exec(`
 `)
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS custom_prompts (
+    id         TEXT PRIMARY KEY,
+    title      TEXT NOT NULL DEFAULT '',
+    text       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`)
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS predictions (
     id           TEXT PRIMARY KEY,
     summary_id   TEXT NOT NULL,

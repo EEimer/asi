@@ -685,6 +685,16 @@ export default function SummaryDetailView() {
     }
   }, [id, summaryOrder])
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.key === 'ArrowLeft' && previousSummaryId) navigate(`/summaries/${previousSummaryId}`)
+      if (e.key === 'ArrowRight' && nextSummaryId) navigate(`/summaries/${nextSummaryId}`)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [previousSummaryId, nextSummaryId, navigate])
+
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
   if (!summary) return <div className="text-center py-20 text-slate-500">Nicht gefunden</div>
 

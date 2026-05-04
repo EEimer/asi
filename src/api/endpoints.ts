@@ -1,16 +1,40 @@
 import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
 
+export interface CustomPrompt {
+  id: string
+  title: string
+  text: string
+  createdAt: string
+  updatedAt: string
+}
+
 const BASE = '/api'
 
 export async function fetchYouTubeFeed(offset = 0, limit = 30, includeBlocked = false): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
   const res = await fetch(`${BASE}/youtube/feed?offset=${offset}&limit=${limit}&includeBlocked=${includeBlocked ? '1' : '0'}`)
-  if (!res.ok) throw new Error(`Feed error: ${res.status}`)
+  if (!res.ok) {
+    const text = await res.text()
+    try {
+      const json = JSON.parse(text)
+      throw new Error(json.error ?? `Feed error: ${res.status}`)
+    } catch {
+      throw new Error(`Feed error: ${res.status}`)
+    }
+  }
   return res.json()
 }
 
 export async function refreshYouTubeFeed(): Promise<void> {
   const res = await fetch(`${BASE}/youtube/feed/refresh`, { method: 'POST' })
-  if (!res.ok) throw new Error(`Refresh error: ${res.status}`)
+  if (!res.ok) {
+    const text = await res.text()
+    try {
+      const json = JSON.parse(text)
+      throw new Error(json.error ?? `Refresh error: ${res.status}`)
+    } catch {
+      throw new Error(`Refresh error: ${res.status}`)
+    }
+  }
 }
 
 export async function fetchSummaries(): Promise<SummaryListItem[]> {
@@ -36,11 +60,12 @@ export async function createSummary(
   meta?: { title?: string; channel?: string; thumbnail?: string },
   lang?: string,
   model?: string,
+  customPrompt?: string,
 ): Promise<{ id: string; status: string }> {
   const res = await fetch(`${BASE}/summaries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model }),
+    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model, customPrompt }),
   })
   if (!res.ok) throw new Error(`Create error: ${res.status}`)
   return res.json()
@@ -85,6 +110,36 @@ export async function updateSettings(settings: Partial<Settings>): Promise<void>
     body: JSON.stringify(settings),
   })
   if (!res.ok) throw new Error(`Settings update error: ${res.status}`)
+}
+
+export async function fetchCustomPrompts(): Promise<CustomPrompt[]> {
+  const res = await fetch(`${BASE}/custom-prompts`)
+  if (!res.ok) throw new Error(`Custom prompts error: ${res.status}`)
+  return res.json()
+}
+
+export async function createCustomPromptApi(title: string, text: string): Promise<CustomPrompt> {
+  const res = await fetch(`${BASE}/custom-prompts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, text }),
+  })
+  if (!res.ok) throw new Error(`Create custom prompt error: ${res.status}`)
+  return res.json()
+}
+
+export async function updateCustomPromptApi(id: string, title: string, text: string): Promise<void> {
+  const res = await fetch(`${BASE}/custom-prompts/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, text }),
+  })
+  if (!res.ok) throw new Error(`Update custom prompt error: ${res.status}`)
+}
+
+export async function deleteCustomPromptApi(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/custom-prompts/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete custom prompt error: ${res.status}`)
 }
 
 export async function fetchNotes(): Promise<Note[]> {

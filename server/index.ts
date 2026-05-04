@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { getAllSummaries, getSummariesPage, getSummariesCount, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
 import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
+import { getAllCustomPrompts, createCustomPrompt, updateCustomPrompt, deleteCustomPrompt } from './db/customPrompts'
 import { getAllPredictions, insertPredictions, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
 import { extractSummaryMeta } from './services/tableParser'
 import { getSettings, updateSettings, resetSettings } from './db/settings'
@@ -28,7 +29,7 @@ function emitStep(summaryId: string, videoTitle: string, step: ProcessingEvent['
   emitEvent({ summaryId, videoTitle, step, message, timestamp: new Date().toISOString() })
 }
 
-async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string) {
+async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string, customPrompt?: string) {
   const label = knownTitle || videoUrl
   try {
     emitStep(id, label, 'metadata', 'Video-Metadaten werden geladen...')
@@ -50,8 +51,8 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
     const settings = loadSettings()
     const summary = await summarizeTranscript(transcript, model, (msg) => {
       emitStep(id, title, 'summarizing', msg)
-    }, { title, channel })
-    updateSummaryDone(id, transcript, summary, settings.summaryPrompt)
+    }, { title, channel }, customPrompt)
+    updateSummaryDone(id, transcript, summary, customPrompt ?? settings.summaryPrompt)
 
     const { author } = extractSummaryMeta(summary)
     if (author) {
@@ -114,23 +115,28 @@ const app = new Elysia()
 
   // YouTube Feed (paginated)
   .get('/api/youtube/feed', async ({ query }) => {
-    const offset = Number(query.offset) || 0
-    const limit = Number(query.limit) || 30
-    const includeBlocked = query.includeBlocked === '1' || query.includeBlocked === 'true'
-    const { videos, total, hasMore } = await fetchSubscriptionFeed(offset, limit)
-    const summarized = getSummarizedVideoIds()
-    if (includeBlocked) {
-      return { videos: videos.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
+    try {
+      const offset = Number(query.offset) || 0
+      const limit = Number(query.limit) || 30
+      const includeBlocked = query.includeBlocked === '1' || query.includeBlocked === 'true'
+      const { videos, total, hasMore } = await fetchSubscriptionFeed(offset, limit)
+      const summarized = getSummarizedVideoIds()
+      if (includeBlocked) {
+        return { videos: videos.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
+      }
+      const blockedRaw = loadSettings().blockedChannels.map(c => c.replace(/^@/, '').toLowerCase())
+      const blocked = new Set(blockedRaw)
+      const filtered = videos.filter(v => {
+        if (blocked.has(v.channel.toLowerCase())) return false
+        const handle = v.channelUrl?.split('/').pop()?.replace(/^@/, '').toLowerCase() ?? ''
+        if (handle && blocked.has(handle)) return false
+        return true
+      })
+      return { videos: filtered.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
+    } catch (e: any) {
+      const message = e?.message || 'YouTube-Feed konnte nicht geladen werden.'
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
-    const blockedRaw = loadSettings().blockedChannels.map(c => c.replace(/^@/, '').toLowerCase())
-    const blocked = new Set(blockedRaw)
-    const filtered = videos.filter(v => {
-      if (blocked.has(v.channel.toLowerCase())) return false
-      const handle = v.channelUrl?.split('/').pop()?.replace(/^@/, '').toLowerCase() ?? ''
-      if (handle && blocked.has(handle)) return false
-      return true
-    })
-    return { videos: filtered.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
   }, { query: t.Object({ offset: t.Optional(t.String()), limit: t.Optional(t.String()), includeBlocked: t.Optional(t.String()) }) })
 
   .post('/api/youtube/feed/refresh', () => {
@@ -159,7 +165,7 @@ const app = new Elysia()
     const thumbnail = body.thumbnailUrl ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
     const id = createSummary(videoId, body.videoUrl, lang, model, title, channel, thumbnail)
     emitStep(id, title || body.videoUrl, 'queued', 'In Warteschlange...')
-    processSummary(id, body.videoUrl, lang, model, title, channel)
+    processSummary(id, body.videoUrl, lang, model, title, channel, body.customPrompt)
     return { id, status: 'processing' }
   }, { body: t.Object({
     videoUrl: t.String(),
@@ -168,6 +174,7 @@ const app = new Elysia()
     thumbnailUrl: t.Optional(t.String()),
     lang: t.Optional(t.String()),
     model: t.Optional(t.String()),
+    customPrompt: t.Optional(t.String()),
   }) })
 
   .get('/api/videos/:videoId/summaries', ({ params }) => {
@@ -296,6 +303,25 @@ const app = new Elysia()
 
   .delete('/api/predictions/:id', ({ params }) => {
     const ok = deletePrediction(params.id)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
+  })
+
+  // Custom Prompts CRUD
+  .get('/api/custom-prompts', () => getAllCustomPrompts())
+
+  .post('/api/custom-prompts', ({ body }) => {
+    return createCustomPrompt(body.title, body.text)
+  }, { body: t.Object({ title: t.String(), text: t.String() }) })
+
+  .put('/api/custom-prompts/:id', ({ params, body }) => {
+    const ok = updateCustomPrompt(params.id, body.title, body.text)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return { ok: true }
+  }, { body: t.Object({ title: t.String(), text: t.String() }) })
+
+  .delete('/api/custom-prompts/:id', ({ params }) => {
+    const ok = deleteCustomPrompt(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return { ok: true }
   })

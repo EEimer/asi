@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { fetchSettings, updateSettings, resetTable } from '../api/endpoints'
+import { fetchSettings, updateSettings, resetTable, fetchCustomPrompts, createCustomPromptApi, updateCustomPromptApi, deleteCustomPromptApi } from '../api/endpoints'
+import type { CustomPrompt } from '../api/endpoints'
 import type { Settings, TtsModel, TtsVoice } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
-import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle } from 'lucide-react'
+import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle, Pencil } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
+import { Modal, ModalFooter } from '../components/Modal'
 import { useToast } from '../store/toastStore'
 
 const LANG_OPTIONS = [
@@ -63,7 +65,18 @@ export default function SettingsView() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [dangerTarget, setDangerTarget] = useState<DangerTarget>(null)
+  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([])
+  const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [editPrompt, setEditPrompt] = useState<CustomPrompt | null>(null)
+  const [promptTitle, setPromptTitle] = useState('')
+  const [promptText, setPromptText] = useState('')
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [promptDeleteTarget, setPromptDeleteTarget] = useState<string | null>(null)
   const { addToast } = useToast()
+
+  useEffect(() => {
+    fetchCustomPrompts().then(setCustomPrompts).catch(console.error)
+  }, [])
 
   useEffect(() => {
     fetchSettings()
@@ -128,6 +141,42 @@ export default function SettingsView() {
     setDangerTarget(null)
   }
 
+  function openNewPrompt() {
+    setEditPrompt(null)
+    setPromptTitle('')
+    setPromptText('')
+    setPromptModalOpen(true)
+  }
+
+  function openEditPrompt(p: CustomPrompt) {
+    setEditPrompt(p)
+    setPromptTitle(p.title)
+    setPromptText(p.text)
+    setPromptModalOpen(true)
+  }
+
+  async function handleSavePrompt() {
+    if (!promptTitle.trim()) return
+    setPromptSaving(true)
+    try {
+      if (editPrompt) {
+        await updateCustomPromptApi(editPrompt.id, promptTitle.trim(), promptText.trim())
+        setCustomPrompts(prev => prev.map(p => p.id === editPrompt.id ? { ...p, title: promptTitle.trim(), text: promptText.trim() } : p))
+      } else {
+        const created = await createCustomPromptApi(promptTitle.trim(), promptText.trim())
+        setCustomPrompts(prev => [created, ...prev])
+      }
+      setPromptModalOpen(false)
+    } catch (e: any) { alert(`Fehler: ${e.message}`) }
+    finally { setPromptSaving(false) }
+  }
+
+  async function handleDeletePrompt(id: string) {
+    await deleteCustomPromptApi(id)
+    setCustomPrompts(prev => prev.filter(p => p.id !== id))
+    setPromptDeleteTarget(null)
+  }
+
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
 
   return (
@@ -140,6 +189,37 @@ export default function SettingsView() {
           <p className="text-xs text-slate-500 mb-3">Dieser Prompt wird vor jedes Transkript gesetzt und an OpenAI geschickt. Das Transkript wird automatisch ans Ende angehängt.</p>
           <textarea value={settings.summaryPrompt} onChange={e => setSettings(s => ({ ...s, summaryPrompt: e.target.value }))}
             rows={10} className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40 resize-y font-mono" />
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-800">Custom Prompts</label>
+              <p className="text-xs text-slate-500 mt-0.5">Wiederverwendbare Prompt-Vorlagen für spezifische Zusammenfassungen.</p>
+            </div>
+            <button onClick={openNewPrompt} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+              <Plus className="w-3.5 h-3.5" /> Neuen Prompt
+            </button>
+          </div>
+          {customPrompts.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">Noch keine Custom Prompts angelegt</p>
+          ) : (
+            <div className="space-y-2">
+              {customPrompts.map(p => (
+                <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span className="text-sm text-slate-700 font-medium truncate">{p.title}</span>
+                  <div className="flex gap-1 shrink-0">
+                    <button onClick={() => openEditPrompt(p)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-100 rounded-lg transition-colors" title="Bearbeiten">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setPromptDeleteTarget(p.id)} className="p-1.5 text-slate-400 hover:text-danger hover:bg-red-50 rounded-lg transition-colors" title="Löschen">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-5 grid grid-cols-3 gap-4">
@@ -313,6 +393,45 @@ export default function SettingsView() {
           variant="danger"
         />
       )}
+
+      <Modal open={promptModalOpen} onClose={() => setPromptModalOpen(false)} title={editPrompt ? 'Prompt bearbeiten' : 'Neuen Prompt erstellen'}>
+        <div className="space-y-3">
+          <input
+            type="text"
+            placeholder="Titel"
+            value={promptTitle}
+            onChange={e => setPromptTitle(e.target.value)}
+            autoFocus
+            className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+          />
+          <textarea
+            placeholder="Prompt-Text..."
+            value={promptText}
+            onChange={e => setPromptText(e.target.value)}
+            rows={8}
+            className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40 resize-y font-mono"
+          />
+        </div>
+        <ModalFooter>
+          <button onClick={() => setPromptModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
+            Abbrechen
+          </button>
+          <button onClick={handleSavePrompt} disabled={promptSaving || !promptTitle.trim()} className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+            {promptSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {editPrompt ? 'Speichern' : 'Erstellen'}
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      <ConfirmModal
+        open={!!promptDeleteTarget}
+        onClose={() => setPromptDeleteTarget(null)}
+        onConfirm={() => promptDeleteTarget && handleDeletePrompt(promptDeleteTarget)}
+        title="Prompt löschen"
+        description="Möchtest du diesen Custom Prompt wirklich löschen?"
+        confirmLabel="Löschen"
+        variant="danger"
+      />
     </div>
   )
 }
