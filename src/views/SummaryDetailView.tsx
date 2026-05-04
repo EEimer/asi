@@ -870,6 +870,7 @@ export default function SummaryDetailView() {
                   <div className="prose prose-sm prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: part }} />
                   {i < htmlParts.length - 1 && (
                     <PredictionsTable
+                      key={summary.id}
                       predictions={predictions}
                       summaryId={summary.id}
                       videoTitle={summary.videoTitle}
@@ -882,6 +883,7 @@ export default function SummaryDetailView() {
               ))}
               {htmlParts.length <= 1 && (
                 <PredictionsTable
+                  key={summary.id}
                   predictions={predictions}
                   summaryId={summary.id}
                   videoTitle={summary.videoTitle}
