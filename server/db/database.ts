@@ -77,6 +77,20 @@ db.exec(`
   )
 `)
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS x_summaries (
+    id            TEXT PRIMARY KEY,
+    tweet_id      TEXT NOT NULL,
+    tweet_url     TEXT NOT NULL,
+    author        TEXT NOT NULL DEFAULT '',
+    tweet_text    TEXT NOT NULL DEFAULT '',
+    summary       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'processing',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`)
+
 // Migrations for existing databases
 try { db.exec('ALTER TABLE summaries ADD COLUMN author TEXT NOT NULL DEFAULT ""') } catch {}
 try { db.exec('ALTER TABLE summaries ADD COLUMN model TEXT NOT NULL DEFAULT ""') } catch {}

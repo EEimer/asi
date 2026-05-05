@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
 
 export interface CustomPrompt {
   id: string
@@ -200,6 +200,23 @@ export async function fetchPredictions(): Promise<Prediction[]> {
   return res.json()
 }
 
+export async function addManualPrediction(payload: {
+  asset: string
+  direction: string
+  ifCases?: string
+  priceTarget?: string
+  author?: string
+  videoTitle?: string
+}): Promise<{ ok: boolean; id: string }> {
+  const res = await fetch(`${BASE}/predictions/manual`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`Manual prediction error: ${res.status}`)
+  return res.json()
+}
+
 export async function deletePrediction(id: string): Promise<void> {
   const res = await fetch(`${BASE}/predictions/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Delete prediction error: ${res.status}`)
@@ -236,4 +253,38 @@ export async function generateTts(payload: {
 
 export function getTtsAudioUrl(summaryId: string, variantKey: string): string {
   return `${BASE}/tts/${encodeURIComponent(summaryId)}/${encodeURIComponent(variantKey)}`
+}
+
+export async function fetchXSummaries(): Promise<XSummary[]> {
+  const res = await fetch(`${BASE}/x`)
+  if (!res.ok) throw new Error(`X summaries error: ${res.status}`)
+  return res.json()
+}
+
+export async function createXSummaryApi(tweetUrl: string): Promise<{ id: string; status: string }> {
+  const res = await fetch(`${BASE}/x`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tweetUrl }),
+  })
+  if (!res.ok) throw new Error(`Create X summary error: ${res.status}`)
+  return res.json()
+}
+
+export async function retryXSummary(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${BASE}/x/${id}/retry`, { method: 'POST' })
+  if (!res.ok) throw new Error(`Retry X summary error: ${res.status}`)
+  return res.json()
+}
+
+export async function deleteXSummaryApi(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/x/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete X summary error: ${res.status}`)
+}
+
+export async function translateXSummary(id: string): Promise<string> {
+  const res = await fetch(`${BASE}/x/${id}/translate`, { method: 'POST' })
+  if (!res.ok) throw new Error(`Translate error: ${res.status}`)
+  const data = await res.json() as { translation: string }
+  return data.translation
 }

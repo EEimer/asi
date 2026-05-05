@@ -3,10 +3,12 @@ import { cors } from '@elysiajs/cors'
 import { getAllSummaries, getSummariesPage, getSummariesCount, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
 import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
 import { getAllCustomPrompts, createCustomPrompt, updateCustomPrompt, deleteCustomPrompt } from './db/customPrompts'
-import { getAllPredictions, insertPredictions, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
+import { getAllPredictions, insertPredictions, insertManualPrediction, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
 import { extractSummaryMeta } from './services/tableParser'
 import { getSettings, updateSettings, resetSettings } from './db/settings'
 import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSubtitles, extractVideoId } from './services/youtube'
+import { fetchXMeta, fetchXContent, extractXId } from './services/xcom'
+import { getAllXSummaries, getXSummaryById, createXSummary, updateXSummaryDone, updateXSummaryError, resetXSummaryForRetry, deleteXSummary } from './db/xSummaries'
 import { summarizeTranscript } from './services/summarizer'
 import { loadSettings } from './config'
 import { clearAllTts, deleteTtsBySummary, ensureTtsStorage, getOrGenerateTts, getTtsIndex, resolveTtsFilePath } from './services/tts'
@@ -29,6 +31,33 @@ function emitStep(summaryId: string, videoTitle: string, step: ProcessingEvent['
   emitEvent({ summaryId, videoTitle, step, message, timestamp: new Date().toISOString() })
 }
 
+const X_PROMPT = 'Fasse den folgenden Tweet-Inhalt kurz auf Deutsch zusammen. Falls nötig erkläre den Kontext. Kein Titel, keine Einleitung, direkt zur Sache. Maximal 3-4 Sätze.'
+
+async function processXSummary(id: string, tweetUrl: string, model: string) {
+  const label = tweetUrl
+  try {
+    emitStep(id, label, 'metadata', 'Tweet wird geladen...')
+    const meta = await fetchXMeta(tweetUrl)
+    const title = meta.title || tweetUrl
+
+    emitStep(id, title, 'transcript', 'Tweet-Inhalt wird extrahiert...')
+    const content = await fetchXContent(tweetUrl)
+
+    emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${model})...`)
+    const summary = await summarizeTranscript(content, model, (msg) => {
+      emitStep(id, title, 'summarizing', msg)
+    }, undefined, X_PROMPT)
+
+    updateXSummaryDone(id, content, meta.channel || '', summary)
+    emitStep(id, title, 'done', 'Fertig!')
+    console.log(`[x done] ${title}`)
+  } catch (e: any) {
+    console.error(`[x error] ${id}: ${e.message}`)
+    updateXSummaryError(id, e.message ?? 'Unknown error')
+    emitStep(id, label, 'error', e.message ?? 'Unbekannter Fehler')
+  }
+}
+
 async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string, customPrompt?: string) {
   const label = knownTitle || videoUrl
   try {
@@ -41,7 +70,7 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
     updateSummaryMeta(id, title, channel, thumbnail)
 
     emitStep(id, title, 'transcript', `Untertitel werden heruntergeladen (${lang}, en)...`)
-    const { text: transcript, usedLang } = await downloadSubtitles(videoUrl, lang)
+    const { text, usedLang } = await downloadSubtitles(videoUrl, lang)
     if (usedLang !== lang) {
       emitStep(id, title, 'transcript', `Kein '${lang}' gefunden, verwende '${usedLang}'`)
       updateSummaryLang(id, usedLang)
@@ -49,10 +78,10 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
 
     emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${model})...`)
     const settings = loadSettings()
-    const summary = await summarizeTranscript(transcript, model, (msg) => {
+    const summary = await summarizeTranscript(text, model, (msg) => {
       emitStep(id, title, 'summarizing', msg)
     }, { title, channel }, customPrompt)
-    updateSummaryDone(id, transcript, summary, customPrompt ?? settings.summaryPrompt)
+    updateSummaryDone(id, text, summary, customPrompt ?? settings.summaryPrompt)
 
     const { author } = extractSummaryMeta(summary)
     if (author) {
@@ -301,6 +330,18 @@ const app = new Elysia()
     })),
   }) })
 
+  .post('/api/predictions/manual', ({ body }) => {
+    const id = insertManualPrediction(body.author ?? '', body.videoTitle ?? '', body.asset, body.direction, body.ifCases ?? '', body.priceTarget ?? '')
+    return { ok: true, id }
+  }, { body: t.Object({
+    asset: t.String(),
+    direction: t.String(),
+    ifCases: t.Optional(t.String()),
+    priceTarget: t.Optional(t.String()),
+    author: t.Optional(t.String()),
+    videoTitle: t.Optional(t.String()),
+  }) })
+
   .delete('/api/predictions/:id', ({ params }) => {
     const ok = deletePrediction(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
@@ -371,6 +412,50 @@ const app = new Elysia()
 
   .delete('/api/reset/settings', () => {
     resetSettings()
+    return { ok: true }
+  })
+
+  // X.com summaries
+  .get('/api/x', () => getAllXSummaries())
+
+  .post('/api/x', ({ body }) => {
+    const settings = loadSettings()
+    const model = settings.openaiModel
+    const tweetId = extractXId(body.tweetUrl)
+    const id = createXSummary(tweetId, body.tweetUrl)
+    emitStep(id, body.tweetUrl, 'queued', 'In Warteschlange...')
+    processXSummary(id, body.tweetUrl, model)
+    return { id, status: 'processing' }
+  }, { body: t.Object({ tweetUrl: t.String() }) })
+
+  .post('/api/x/:id/retry', ({ params }) => {
+    const summary = getXSummaryById(params.id)
+    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    resetXSummaryForRetry(params.id)
+    const settings = loadSettings()
+    emitStep(summary.id, summary.tweetUrl, 'queued', 'Retry gestartet...')
+    processXSummary(summary.id, summary.tweetUrl, settings.openaiModel)
+    return { ok: true, id: summary.id, status: 'processing' }
+  })
+
+  .post('/api/x/:id/translate', async ({ params }) => {
+    const summary = getXSummaryById(params.id)
+    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    const settings = loadSettings()
+    const content = await fetchXContent(summary.tweetUrl)
+    const translation = await summarizeTranscript(
+      content,
+      settings.openaiModel,
+      undefined,
+      undefined,
+      'Übersetze den folgenden Text vollständig und wörtlich ins Deutsche. Keine Zusammenfassung, exakte Übersetzung.',
+    )
+    return { translation }
+  })
+
+  .delete('/api/x/:id', ({ params }) => {
+    const ok = deleteXSummary(params.id)
+    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return { ok: true }
   })
 

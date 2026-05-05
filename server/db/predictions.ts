@@ -35,6 +35,18 @@ export function insertPredictions(summaryId: string, videoTitle: string, videoUr
   }
 }
 
+export function insertManualPrediction(author: string, videoTitle: string, asset: string, direction: string, ifCases: string, priceTarget: string): string {
+  const id = `pred_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    db.prepare('INSERT INTO predictions (id, summary_id, video_title, video_url, channel_name, author, asset_name, direction, if_cases, price_target) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, '', videoTitle, '', author, author, asset, direction, ifCases, priceTarget)
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+  return id
+}
+
 export function deletePrediction(id: string): boolean {
   const result = db.query('DELETE FROM predictions WHERE id = ?').run(id)
   return result.changes > 0

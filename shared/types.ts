@@ -137,6 +137,18 @@ export interface Settings {
   ttsInstructions: string
 }
 
+export interface XSummary {
+  id: string
+  tweetId: string
+  tweetUrl: string
+  author: string
+  tweetText: string
+  summary: string
+  status: 'processing' | 'done' | 'error'
+  errorMessage: string
+  createdAt: string
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   summaryPrompt: `Du bist ein Experte für Zusammenfassungen von YouTube-Videos.
 

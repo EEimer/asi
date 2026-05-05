@@ -1,11 +1,12 @@
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { Youtube, FileText, Gem, StickyNote, Settings } from 'lucide-react'
+import { Youtube, FileText, Gem, StickyNote, Settings, X as XIcon } from 'lucide-react'
 import BrowseView from './views/BrowseView'
 import SummariesView from './views/SummariesView'
 import SummaryDetailView from './views/SummaryDetailView'
 import GlaskugelView from './views/GlaskugelView'
 import NotesView from './views/NotesView'
 import SettingsView from './views/SettingsView'
+import XView from './views/XView'
 import ToastStack from './components/ToastStack'
 import ProcessingConsole from './components/ProcessingConsole'
 import NavAudioPlayer from './components/NavAudioPlayer'
@@ -15,7 +16,8 @@ const navItems = [
   { to: '/summaries', label: 'Zusammenfassungen', icon: FileText },
   { to: '/glaskugel', label: 'Glaskugel', icon: Gem },
   { to: '/notes', label: 'Notizen', icon: StickyNote },
-{ to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/x', label: 'X', icon: XIcon },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export default function App() {
@@ -51,8 +53,9 @@ export default function App() {
           <Route path="/summaries" element={<SummariesView />} />
           <Route path="/summaries/:id" element={<SummaryDetailView />} />
           <Route path="/glaskugel" element={<GlaskugelView />} />
-          <Route path="/notes" element={<NotesView />} />
-<Route path="/settings" element={<SettingsView />} />
+                    <Route path="/notes" element={<NotesView />} />
+          <Route path="/x" element={<XView />} />
+          <Route path="/settings" element={<SettingsView />} />
         </Routes>
       </main>
       <ProcessingConsole />
