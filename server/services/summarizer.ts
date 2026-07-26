@@ -1,4 +1,5 @@
 import { OPENAI_API_KEY, ANTHROPIC_API_KEY, loadSettings } from '../config'
+import { fetchOrThrow, withRetry, type RetryNotifier } from './retry'
 
 const MAX_CHUNK_WORDS = 12_000
 const OVERLAP_WORDS = 200
@@ -40,30 +41,28 @@ async function callOpenAI(
   systemPrompt: string,
   userContent: string,
   maxTokens = 4000,
+  onRetry?: RetryNotifier,
 ): Promise<string> {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured')
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    }),
-  })
+  return withRetry(async () => {
+    const response = await fetchOrThrow('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      }),
+    }, 'OpenAI API')
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`OpenAI API ${response.status}: ${body.slice(0, 300)}`)
-  }
-
-  const data = await response.json() as any
-  return data.choices?.[0]?.message?.content ?? ''
+    const data = await response.json() as any
+    return data.choices?.[0]?.message?.content ?? ''
+  }, { label: `OpenAI ${model}`, onRetry })
 }
 
 async function callAnthropic(
@@ -71,33 +70,31 @@ async function callAnthropic(
   systemPrompt: string,
   userContent: string,
   maxTokens = 4000,
+  onRetry?: RetryNotifier,
 ): Promise<string> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured')
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userContent }],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    }),
-  })
+  return withRetry(async () => {
+    const response = await fetchOrThrow('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      }),
+    }, 'Anthropic API')
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 300)}`)
-  }
-
-  const data = await response.json() as any
-  const firstText = data.content?.find?.((c: any) => c?.type === 'text')?.text
-  return firstText ?? ''
+    const data = await response.json() as any
+    const firstText = data.content?.find?.((c: any) => c?.type === 'text')?.text
+    return firstText ?? ''
+  }, { label: `Anthropic ${model}`, onRetry })
 }
 
 async function callModel(
@@ -105,11 +102,12 @@ async function callModel(
   systemPrompt: string,
   userContent: string,
   maxTokens = 4000,
+  onRetry?: RetryNotifier,
 ): Promise<string> {
   if (model.toLowerCase().startsWith('claude')) {
-    return callAnthropic(model, systemPrompt, userContent, maxTokens)
+    return callAnthropic(model, systemPrompt, userContent, maxTokens, onRetry)
   }
-  return callOpenAI(model, systemPrompt, userContent, maxTokens)
+  return callOpenAI(model, systemPrompt, userContent, maxTokens, onRetry)
 }
 
 export interface TranscriptContext {
@@ -135,9 +133,16 @@ export async function summarizeTranscript(
   ].filter(Boolean).join('\n')
   const userPrefix = metaHeader ? `${metaHeader}\n\nTranskript:\n` : ''
 
+  // Retry-Versuche sichtbar machen, damit im UI nicht einfach "hängt" steht.
+  const retryNotifier = (prefix = ''): RetryNotifier => ({ attempt, maxAttempts, delayMs, reason }) => {
+    onProgress?.(
+      `${prefix}${reason} — neuer Versuch ${attempt + 1}/${maxAttempts} in ${(delayMs / 1000).toFixed(1)}s...`,
+    )
+  }
+
   if (wordCount <= MAX_CHUNK_WORDS) {
     onProgress?.(`Zusammenfassung läuft (${wordCount.toLocaleString('de-DE')} Wörter)...`)
-    return callModel(model, promptText, userPrefix + transcript)
+    return callModel(model, promptText, userPrefix + transcript, 4000, retryNotifier())
   }
 
   const chunks = splitIntoChunks(transcript, MAX_CHUNK_WORDS)
@@ -152,6 +157,8 @@ export async function summarizeTranscript(
       model,
       `${CHUNK_SYSTEM_PROMPT}\n\nDies ist Teil ${i + 1} von ${chunks.length}.`,
       chunkMeta + chunks[i],
+      4000,
+      retryNotifier(`Teil ${i + 1}/${chunks.length}: `),
     )
     chunkResults.push(result)
   }
@@ -159,5 +166,5 @@ export async function summarizeTranscript(
   onProgress?.('Ergebnisse werden zur finalen Zusammenfassung kombiniert...')
   const mergedInput = chunkResults.map((r, i) => `--- Teil ${i + 1} ---\n${r}`).join('\n\n')
   const mergePrefix = metaHeader ? `${metaHeader}\n\n${MERGE_USER_PREFIX}` : MERGE_USER_PREFIX
-  return callModel(model, promptText, mergePrefix + mergedInput)
+  return callModel(model, promptText, mergePrefix + mergedInput, 4000, retryNotifier('Finale Zusammenfassung: '))
 }

@@ -135,6 +135,8 @@ export interface Settings {
   ttsModel: TtsModel
   ttsVoice: TtsVoice
   ttsInstructions: string
+  /** Max. gleichzeitige OpenAI/Anthropic-Requests. Niedriger = weniger 429er. */
+  apiConcurrency: number
 }
 
 export interface XSummary {
@@ -201,4 +203,5 @@ Transkript:
   ttsModel: 'tts-1-hd',
   ttsVoice: 'nova',
   ttsInstructions: '',
+  apiConcurrency: 1,
 }

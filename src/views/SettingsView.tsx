@@ -244,6 +244,24 @@ export default function SettingsView() {
               {MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-800 mb-2">Parallele API-Requests</label>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={settings.apiConcurrency}
+              onChange={e => {
+                const n = Number(e.target.value)
+                setSettings(s => ({ ...s, apiConcurrency: Number.isFinite(n) ? Math.min(10, Math.max(1, Math.floor(n))) : 1 }))
+              }}
+              className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Wie viele KI-Requests gleichzeitig laufen dürfen. 1 = seriell, empfohlen bei niedrigem Rate Limit (429-Fehler).
+              Fehlgeschlagene Requests werden automatisch bis zu 5x wiederholt.
+            </p>
+          </div>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-5">

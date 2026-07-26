@@ -13,6 +13,7 @@ import { summarizeTranscript } from './services/summarizer'
 import { loadSettings } from './config'
 import { clearAllTts, deleteTtsBySummary, ensureTtsStorage, getOrGenerateTts, getTtsIndex, resolveTtsFilePath } from './services/tts'
 import { sendAudioToTelegram } from './services/telegram'
+import { setApiConcurrency } from './services/retry'
 import { DEFAULT_SETTINGS, type ProcessingEvent, type TtsModel, type TtsVoice } from '../shared/types'
 import { existsSync } from 'node:fs'
 
@@ -22,6 +23,7 @@ const port = Number(process.env.PORT ?? 8788)
 type EventListener = (event: ProcessingEvent) => void
 const listeners = new Set<EventListener>()
 ensureTtsStorage()
+setApiConcurrency(loadSettings().apiConcurrency)
 
 function emitEvent(event: ProcessingEvent) {
   for (const listener of listeners) listener(event)
@@ -130,6 +132,8 @@ const app = new Elysia()
 
   .put('/api/settings', ({ body }) => {
     updateSettings(body)
+    // Limiter sofort nachziehen, sonst greift der neue Wert erst nach Neustart.
+    if (body.apiConcurrency !== undefined) setApiConcurrency(body.apiConcurrency)
     return { ok: true }
   }, { body: t.Object({
     summaryPrompt: t.Optional(t.String()),
@@ -140,6 +144,7 @@ const app = new Elysia()
     ttsModel: t.Optional(t.String()),
     ttsVoice: t.Optional(t.String()),
     ttsInstructions: t.Optional(t.String()),
+    apiConcurrency: t.Optional(t.Number({ minimum: 1, maximum: 10 })),
   }) })
 
   // YouTube Feed (paginated)
@@ -258,6 +263,7 @@ const app = new Elysia()
         voice: requestedVoice,
         instructions: requestedInstructions,
         forceRegenerate: body.forceRegenerate ?? false,
+        onProgress: (msg) => emitStep(body.summaryId, label, 'tts_generating', msg),
       })
       if (result.cached) emitStep(body.summaryId, label, 'tts_cached', `TTS Cache-Hit (${result.model}, ${result.voice})`)
       else emitStep(body.summaryId, label, 'tts_done', `TTS erstellt (${result.model}, ${result.voice})`)

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { OPENAI_API_KEY } from '../config'
+import { fetchOrThrow, withRetry, type RetryNotifier } from './retry'
 import type { TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, TtsVariantConfig, TtsVariantIndexEntry } from '../../shared/types'
 
 const TTS_DIR = join(import.meta.dir, '../data/tts')
@@ -95,7 +96,11 @@ export function findVariantByConfig(summaryId: string, config: TtsVariantConfig)
   return null
 }
 
-async function callOpenAiSpeechApi(config: TtsVariantConfig, text: string): Promise<Buffer> {
+async function callOpenAiSpeechApi(
+  config: TtsVariantConfig,
+  text: string,
+  onRetry?: RetryNotifier,
+): Promise<Buffer> {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured')
   const body: Record<string, string> = {
     model: config.model,
@@ -107,20 +112,19 @@ async function callOpenAiSpeechApi(config: TtsVariantConfig, text: string): Prom
   if (config.model === 'gpt-4o-mini-tts' && normalizedInstructions) {
     body.instructions = normalizedInstructions
   }
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  })
-  if (!response.ok) {
-    const errText = await response.text()
-    throw new Error(`OpenAI TTS API ${response.status}: ${errText.slice(0, 300)}`)
-  }
-  const arrayBuffer = await response.arrayBuffer()
-  return Buffer.from(arrayBuffer)
+
+  return withRetry(async () => {
+    const response = await fetchOrThrow('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    }, 'OpenAI TTS API')
+    const arrayBuffer = await response.arrayBuffer()
+    return Buffer.from(arrayBuffer)
+  }, { label: `OpenAI TTS ${config.model}`, onRetry })
 }
 
 function splitTextForTts(text: string): string[] {
@@ -157,6 +161,7 @@ export async function getOrGenerateTts(input: {
   voice: TtsVoice
   instructions: string
   forceRegenerate?: boolean
+  onProgress?: (message: string) => void
 }): Promise<TtsGenerateResponse> {
   ensureTtsStorage()
   const model = input.model
@@ -196,8 +201,13 @@ export async function getOrGenerateTts(input: {
 
   const textChunks = splitTextForTts(input.text)
   const buffers: Buffer[] = []
-  for (const chunk of textChunks) {
-    const part = await callOpenAiSpeechApi(config, chunk)
+  for (let i = 0; i < textChunks.length; i++) {
+    const partLabel = textChunks.length > 1 ? `Teil ${i + 1}/${textChunks.length}: ` : ''
+    const part = await callOpenAiSpeechApi(config, textChunks[i], ({ attempt, maxAttempts, delayMs, reason }) => {
+      input.onProgress?.(
+        `${partLabel}${reason} — neuer Versuch ${attempt + 1}/${maxAttempts} in ${(delayMs / 1000).toFixed(1)}s...`,
+      )
+    })
     buffers.push(part)
   }
   const audioBuffer = Buffer.concat(buffers)

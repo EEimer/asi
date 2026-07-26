@@ -10,9 +10,11 @@ const KEY_MAP: Record<string, keyof Settings> = {
   tts_model: 'ttsModel',
   tts_voice: 'ttsVoice',
   tts_instructions: 'ttsInstructions',
+  api_concurrency: 'apiConcurrency',
 }
 
 const JSON_KEYS = new Set<keyof Settings>(['blockedChannels'])
+const NUMBER_KEYS = new Set<keyof Settings>(['apiConcurrency'])
 
 const REVERSE_MAP: Record<string, string> = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]))
 
@@ -22,7 +24,11 @@ export function getSettings(): Partial<Settings> {
   for (const row of rows) {
     const mapped = KEY_MAP[row.key]
     if (mapped) {
-      const parsed = JSON_KEYS.has(mapped) ? JSON.parse(row.value) : row.value
+      const parsed = JSON_KEYS.has(mapped)
+        ? JSON.parse(row.value)
+        : NUMBER_KEYS.has(mapped)
+          ? (Number.isFinite(Number(row.value)) ? Math.max(1, Math.floor(Number(row.value))) : 1)
+          : row.value
       result[mapped] = mapped === 'openaiModel' && parsed === 'claude-3-5-haiku-latest'
         ? 'claude-haiku-4-5'
         : parsed
