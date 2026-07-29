@@ -50,20 +50,57 @@ function variantMatches(entry: { model: string; voice: string; instructions: str
     && normalizeInstructions(entry.instructions) === normalizeInstructions(draft.instructions)
 }
 
-const EXCERPT_SENTENCES = 5
-const EXCERPT_MAX_CHARS = 300
+const EXCERPT_SENTENCES = 3
+const EXCERPT_MAX_CHARS = 220
+
+const META_HEADING = /^#{1,6}\s*(?:metadaten|metadata|kopfdaten|übersicht)\s*:?\s*$/i
+const META_LABELS = new Set([
+  'titel', 'videotitel', 'video-titel', 'title', 'video',
+  'kanal', 'kanal/interviewer', 'kanal / interviewer', 'channel',
+  'autor', 'author', 'sprecher', 'hauptsprecher', 'interviewpartner',
+  'hauptsprecher / interviewpartner', 'hauptsprecher/interviewpartner',
+  'gast', 'gäste', 'moderator', 'quelle', 'source',
+  'datum', 'date', 'dauer', 'länge', 'link', 'url',
+])
+
+/** Zeile aus dem Metadaten-Kopf? Entweder bekannte Beschriftung oder ein Wert,
+ *  der exakt das wiederholt, was ohnehin schon auf der Karte steht. */
+function isMetaLine(line: string, title?: string, channel?: string): boolean {
+  const clean = line.replace(/^\s*[-*+]\s+/, '').replace(/\*\*|__/g, '').trim()
+  const colon = clean.indexOf(':')
+  if (colon < 0) return false
+  const label = clean.slice(0, colon).trim().toLowerCase()
+  if (META_LABELS.has(label)) return true
+  if (label.length > 40) return false
+  const value = clean.slice(colon + 1).trim().toLowerCase()
+  if (!value) return false
+  return value === (title ?? '').trim().toLowerCase() || value === (channel ?? '').trim().toLowerCase()
+}
+
+/** Führenden Metadaten-Block abschneiden — je nach Modell mal als "## Metadaten"-
+ *  Abschnitt, mal als lose Liste, mal ganz ohne Überschrift. */
+function stripMetaHeader(summary: string, title?: string, channel?: string): string {
+  const lines = summary.split('\n')
+  let i = 0
+  let sawMeta = false
+  while (i < lines.length) {
+    const trimmed = lines[i].trim()
+    if (!trimmed || /^[-*_]{3,}$/.test(trimmed)) { i++; continue }
+    if (META_HEADING.test(trimmed)) { sawMeta = true; i++; continue }
+    if (isMetaLine(trimmed, title, channel)) { sawMeta = true; i++; continue }
+    break
+  }
+  return sawMeta ? lines.slice(i).join('\n') : summary
+}
 
 /**
  * Vorschautext für die Karten: die ersten Sätze der Zusammenfassung, von
  * Markdown befreit. Bewusst inhaltsbasiert statt an einen Abschnitt gebunden —
  * so bleibt die Vorschau auch dann heil, wenn sich der Prompt ändert.
  */
-function summaryExcerpt(summary: string): string {
+function summaryExcerpt(summary: string, title?: string, channel?: string): string {
   // Metadaten-Kopf überspringen: Titel und Kanal stehen bereits auf der Karte.
-  const firstSection = summary.search(/^##\s+/m)
-  const body = firstSection >= 0 ? summary.slice(firstSection) : summary
-
-  const plain = body
+  const plain = stripMetaHeader(summary, title, channel)
     .replace(/```[\s\S]*?```/g, ' ')      // Codeblöcke (Assets-JSON)
     .replace(/^#{1,6}\s.*$/gm, ' ')       // Überschriften
     .replace(/^\s*-{3,}\s*$/gm, ' ')      // Trennlinien
@@ -418,7 +455,7 @@ export default function SummariesView() {
                           {s.channelName}
                           {s.author && s.author !== s.channelName && <span className="text-slate-400"> · {s.author}</span>}
                         </p>
-                        {s.status === 'done' && s.summary && <p className="text-xs text-slate-600 mt-2 line-clamp-3">{summaryExcerpt(s.summary)}</p>}
+                        {s.status === 'done' && s.summary && <p className="text-xs text-slate-600 mt-2 line-clamp-3">{summaryExcerpt(s.summary, s.videoTitle, s.channelName)}</p>}
                         {s.status === 'error' && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{s.errorMessage?.slice(0, 100)}</p>}
                         <div className="flex items-center gap-3 mt-2">
                           <span className="flex items-center gap-1 text-[10px] text-slate-400">
