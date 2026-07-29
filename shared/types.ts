@@ -151,6 +151,76 @@ export interface XSummary {
   createdAt: string
 }
 
+export type ChatRole = 'user' | 'assistant'
+
+/** Eine gespeicherte Nachricht im Nachfrage-Chat zu einer Zusammenfassung. */
+export interface ChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  /** Modell, das diese Antwort erzeugt hat. Leer bei User-Nachrichten. */
+  model?: string
+  createdAt: string
+}
+
+export type ModelProvider = 'openai' | 'anthropic'
+/** Auswahl-Stufe: bewusst kuratiert statt vollständiger Modell-Katalog. */
+export type ModelTier = 'gut' | 'mittel' | 'beste'
+
+export interface ModelOption {
+  value: string
+  /** Vollständiges Label im Settings-Dropdown. */
+  label: string
+  /** Kurzform für das Badge in der Übersicht. */
+  short: string
+  provider: ModelProvider
+  tier: ModelTier
+  hint: string
+}
+
+export const MODEL_TIER_LABELS: Record<ModelTier, string> = {
+  gut: 'Gut — schnell & günstig',
+  mittel: 'Mittel — ausgewogen',
+  beste: 'Beste — höchste Qualität',
+}
+
+export const MODEL_OPTIONS: ModelOption[] = [
+  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', short: '5.4 Mini', provider: 'openai', tier: 'gut', hint: 'Schnellste und günstigste Option' },
+  { value: 'claude-sonnet-5', label: 'Claude Sonnet 5', short: 'Sonnet 5', provider: 'anthropic', tier: 'gut', hint: 'Schnell, nahe an Opus-Qualität' },
+  { value: 'gpt-5.5', label: 'GPT-5.5', short: 'GPT-5.5', provider: 'openai', tier: 'mittel', hint: 'Guter Kompromiss aus Tempo und Tiefe' },
+  { value: 'claude-opus-5', label: 'Claude Opus 5', short: 'Opus 5', provider: 'anthropic', tier: 'mittel', hint: 'Stark bei langen Transkripten' },
+  // gpt-5.5-pro & Co. laufen nur über die Responses-API, nicht über
+  // /v1/chat/completions — daher hier die neueste Chat-fähige Generation.
+  { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', short: '5.6 Terra', provider: 'openai', tier: 'beste', hint: 'Neueste OpenAI-Generation (Varianten: luna/sol/terra)' },
+  { value: 'claude-fable-5', label: 'Claude Fable 5', short: 'Fable 5', provider: 'anthropic', tier: 'beste', hint: 'Anthropics stärkstes Modell, teuerste Option' },
+]
+
+/**
+ * Anzeigenamen für Modelle, die nicht mehr zur Auswahl stehen. Alte
+ * Zusammenfassungen speichern ihre Modell-ID mit — ohne diese Tabelle stünde
+ * dort die nackte ID im Badge.
+ */
+export const LEGACY_MODEL_LABELS: Record<string, string> = {
+  'gpt-4o': 'GPT-4o',
+  'gpt-4o-mini': '4o Mini',
+  'gpt-4-turbo': 'GPT-4 Turbo',
+  'gpt-4.1': 'GPT-4.1',
+  'gpt-5': 'GPT-5',
+  'gpt-5.1': 'GPT-5.1',
+  'gpt-5.2': 'GPT-5.2',
+  'gpt-5.4': 'GPT-5.4',
+  'claude-haiku-4-5': 'Haiku 4.5',
+  'claude-sonnet-4-6': 'Sonnet 4.6',
+  'claude-opus-4-6': 'Opus 4.6',
+  'claude-opus-4-8': 'Opus 4.8',
+  'claude-opus-4-1': 'Opus 4.1',
+  'claude-3-5-haiku-latest': 'Haiku 3.5',
+}
+
+export function modelLabel(model: string): string {
+  return MODEL_OPTIONS.find(m => m.value === model)?.short ?? LEGACY_MODEL_LABELS[model] ?? model
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   summaryPrompt: `Du bist ein Experte für Zusammenfassungen von YouTube-Videos.
 
@@ -159,14 +229,17 @@ export const DEFAULT_SETTINGS: Settings = {
 
 ---
 
-## TLDR
-[2–4 prägnante Sätze. Die wichtigste Aussage zuerst.]
+## Kernaussagen
+- [Bullet Points, nur inhaltlich relevante Punkte]
+- Die wichtigste Aussage zuerst
+- Werbung, Sponsoring und Off-Topic werden ignoriert
 
 ---
 
-## Kernaussagen
-- [Bullet Points, nur inhaltlich relevante Punkte]
-- Werbung, Sponsoring und Off-Topic werden ignoriert
+## Erwähnenswertes
+- [Was am Rande auffällt und hängen bleibt: überraschende Zahlen, Anekdoten, genannte Quellen, Buch- oder Tool-Empfehlungen, pointierte Meinungen, Widersprüche zu vorher Gesagtem]
+- Lieber zwei starke Punkte als sechs belanglose
+- Wenn nichts Erwähnenswertes vorkommt: Abschnitt weglassen
 
 ---
 
@@ -198,7 +271,7 @@ Transkript:
 `,
   defaultLang: 'de',
   cookieBrowser: 'brave',
-  openaiModel: 'gpt-4o',
+  openaiModel: 'gpt-5.5',
   blockedChannels: [],
   ttsModel: 'tts-1-hd',
   ttsVoice: 'nova',

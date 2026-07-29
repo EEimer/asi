@@ -36,14 +36,59 @@ function splitIntoChunks(text: string, maxWords: number): string[] {
   return chunks
 }
 
+const TEMPERATURE = 0.3
+const MAX_OUTPUT_TOKENS = 4000
+/**
+ * Reasoning-Modelle rechnen ihre internen Denk-Tokens gegen dasselbe Budget wie
+ * die sichtbare Antwort. Mit 4000 kann das Denken das Budget komplett
+ * aufbrauchen und eine leere Zusammenfassung zurückkommen.
+ */
+const MAX_OUTPUT_TOKENS_REASONING = 16_000
+
+/**
+ * GPT-5 und die o-Reihe verlangen `max_completion_tokens` statt `max_tokens`
+ * und akzeptieren nur die Default-Temperature. Beides sonst: HTTP 400.
+ */
+function isOpenAiReasoningModel(model: string): boolean {
+  return /^(gpt-5|o[1-9])/i.test(model)
+}
+
+/**
+ * Anthropic hat die Sampling-Parameter ab Opus 4.7 entfernt — `temperature`
+ * quittieren diese Modelle mit HTTP 400. Umgekehrte Logik (Allowlist der alten
+ * Modelle), weil ein weggelassenes `temperature` immer gültig ist, ein
+ * mitgeschicktes aber jedes neue Modell bricht.
+ */
+const ANTHROPIC_TEMPERATURE_MODELS = [
+  'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-opus-4-5',
+  'claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-opus-4-1', 'claude-3',
+]
+
+function anthropicAcceptsTemperature(model: string): boolean {
+  return ANTHROPIC_TEMPERATURE_MODELS.some(prefix => model.toLowerCase().startsWith(prefix))
+}
+
+/** Denkt das Modell (Anthropic ab Opus 5 standardmäßig)? Dann mehr Budget. */
+function isAnthropicThinkingModel(model: string): boolean {
+  return /^claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[78])/i.test(model)
+}
+
+/** Ein Gesprächs-Turn. Reicht für beide Provider — der System-Prompt läuft separat. */
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 async function callOpenAI(
   model: string,
   systemPrompt: string,
-  userContent: string,
-  maxTokens = 4000,
+  messages: ChatTurn[],
   onRetry?: RetryNotifier,
 ): Promise<string> {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured')
+
+  const reasoning = isOpenAiReasoningModel(model)
+  const budget = reasoning ? MAX_OUTPUT_TOKENS_REASONING : MAX_OUTPUT_TOKENS
 
   return withRetry(async () => {
     const response = await fetchOrThrow('https://api.openai.com/v1/chat/completions', {
@@ -53,10 +98,11 @@ async function callOpenAI(
         model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
+          ...messages,
         ],
-        temperature: 0.3,
-        max_tokens: maxTokens,
+        ...(reasoning
+          ? { max_completion_tokens: budget }
+          : { temperature: TEMPERATURE, max_tokens: budget }),
       }),
     }, 'OpenAI API')
 
@@ -68,11 +114,12 @@ async function callOpenAI(
 async function callAnthropic(
   model: string,
   systemPrompt: string,
-  userContent: string,
-  maxTokens = 4000,
+  messages: ChatTurn[],
   onRetry?: RetryNotifier,
 ): Promise<string> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured')
+
+  const budget = isAnthropicThinkingModel(model) ? MAX_OUTPUT_TOKENS_REASONING : MAX_OUTPUT_TOKENS
 
   return withRetry(async () => {
     const response = await fetchOrThrow('https://api.anthropic.com/v1/messages', {
@@ -85,29 +132,31 @@ async function callAnthropic(
       body: JSON.stringify({
         model,
         system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
-        temperature: 0.3,
-        max_tokens: maxTokens,
+        messages,
+        ...(anthropicAcceptsTemperature(model) ? { temperature: TEMPERATURE } : {}),
+        max_tokens: budget,
       }),
     }, 'Anthropic API')
 
     const data = await response.json() as any
-    const firstText = data.content?.find?.((c: any) => c?.type === 'text')?.text
-    return firstText ?? ''
+    // Denk-Blöcke überspringen und den eigentlichen Antworttext einsammeln.
+    const texts = (data.content ?? [])
+      .filter((c: any) => c?.type === 'text')
+      .map((c: any) => c.text ?? '')
+    return texts.join('').trim()
   }, { label: `Anthropic ${model}`, onRetry })
 }
 
-async function callModel(
+export async function callModel(
   model: string,
   systemPrompt: string,
-  userContent: string,
-  maxTokens = 4000,
+  messages: ChatTurn[],
   onRetry?: RetryNotifier,
 ): Promise<string> {
   if (model.toLowerCase().startsWith('claude')) {
-    return callAnthropic(model, systemPrompt, userContent, maxTokens, onRetry)
+    return callAnthropic(model, systemPrompt, messages, onRetry)
   }
-  return callOpenAI(model, systemPrompt, userContent, maxTokens, onRetry)
+  return callOpenAI(model, systemPrompt, messages, onRetry)
 }
 
 export interface TranscriptContext {
@@ -142,7 +191,7 @@ export async function summarizeTranscript(
 
   if (wordCount <= MAX_CHUNK_WORDS) {
     onProgress?.(`Zusammenfassung läuft (${wordCount.toLocaleString('de-DE')} Wörter)...`)
-    return callModel(model, promptText, userPrefix + transcript, 4000, retryNotifier())
+    return callModel(model, promptText, [{ role: 'user', content: userPrefix + transcript }], retryNotifier())
   }
 
   const chunks = splitIntoChunks(transcript, MAX_CHUNK_WORDS)
@@ -156,8 +205,7 @@ export async function summarizeTranscript(
     const result = await callModel(
       model,
       `${CHUNK_SYSTEM_PROMPT}\n\nDies ist Teil ${i + 1} von ${chunks.length}.`,
-      chunkMeta + chunks[i],
-      4000,
+      [{ role: 'user', content: chunkMeta + chunks[i] }],
       retryNotifier(`Teil ${i + 1}/${chunks.length}: `),
     )
     chunkResults.push(result)
@@ -166,5 +214,5 @@ export async function summarizeTranscript(
   onProgress?.('Ergebnisse werden zur finalen Zusammenfassung kombiniert...')
   const mergedInput = chunkResults.map((r, i) => `--- Teil ${i + 1} ---\n${r}`).join('\n\n')
   const mergePrefix = metaHeader ? `${metaHeader}\n\n${MERGE_USER_PREFIX}` : MERGE_USER_PREFIX
-  return callModel(model, promptText, mergePrefix + mergedInput, 4000, retryNotifier('Finale Zusammenfassung: '))
+  return callModel(model, promptText, [{ role: 'user', content: mergePrefix + mergedInput }], retryNotifier('Finale Zusammenfassung: '))
 }

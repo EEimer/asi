@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, generateTts, fetchTtsIndex, fetchCustomPrompts } from '../api/endpoints'
 import type { CustomPrompt } from '../api/endpoints'
 import type { TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, EyeOff, LinkIcon, Play, Send, Check, Wand2 } from 'lucide-react'
+import { MODEL_OPTIONS, DEFAULT_SETTINGS } from '../../shared/types'
+import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, LinkIcon, Play, Send, Check, Wand2 } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { useAudioPlayer } from '../store/audioPlayerStore'
@@ -26,14 +27,18 @@ function timeAgo(ts: number): string {
   return 'gerade eben'
 }
 
-const MODEL_OPTIONS = [
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { value: 'claude-opus-4-1', label: 'Opus' },
-]
+// Mirrors the server-side matching in /api/youtube/feed: compare on the bare
+// handle/name, case-insensitive and without a leading @.
+function channelKey(value: string): string {
+  return value.trim().replace(/^@/, '').toLowerCase()
+}
+
+function channelKeysOf(video: YouTubeVideo): string[] {
+  const keys = [channelKey(video.channel ?? '')]
+  const handle = video.channelUrl?.split('/').pop() ?? ''
+  if (handle) keys.push(channelKey(handle))
+  return keys.filter(Boolean)
+}
 
 
 export default function BrowseView() {
@@ -58,9 +63,10 @@ export default function BrowseView() {
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null)
   const [customPromptUrl, setCustomPromptUrl] = useState('')
   const [customPromptSubmitting, setCustomPromptSubmitting] = useState(false)
-  const [defaultModel, setDefaultModel] = useState('gpt-4o')
-  const [selectedModel, setSelectedModel] = useState('gpt-4o')
+  const [defaultModel, setDefaultModel] = useState(DEFAULT_SETTINGS.openaiModel)
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.openaiModel)
   const [channelFilterMode, setChannelFilterMode] = useState<'filtered' | 'all'>('filtered')
+  const [blockedChannels, setBlockedChannels] = useState<string[]>([])
   const [ttsDefaults, setTtsDefaults] = useState<{ model: TtsModel; voice: TtsVoice; instructions: string }>({
     model: 'tts-1-hd',
     voice: 'nova',
@@ -72,6 +78,7 @@ export default function BrowseView() {
   const [ttsErrors, setTtsErrors] = useState<Record<string, string>>({})
   const player = useAudioPlayer()
   const showAllChannels = channelFilterMode === 'all'
+  const blockedKeys = new Set(blockedChannels.map(channelKey))
 
   async function refreshSummaryStatusMaps() {
     try {
@@ -127,9 +134,15 @@ export default function BrowseView() {
         setTtsIndex(index)
         setDefaultModel(s.openaiModel)
         setSelectedModel(s.openaiModel)
+        setBlockedChannels(s.blockedChannels)
       })
       .catch(() => {})
   }, [])
+
+  // Blocked list can change elsewhere (Settings) - re-sync when the feed mode flips.
+  useEffect(() => {
+    fetchSettings().then(s => setBlockedChannels(s.blockedChannels)).catch(() => {})
+  }, [showAllChannels])
 
   async function runTtsJob(video: YouTubeVideo, summaryId: string, mode: PendingTtsMode) {
     setRunningTtsByVideo(prev => ({ ...prev, [video.id]: true }))
@@ -388,12 +401,31 @@ export default function BrowseView() {
     if (!channel) return
     try {
       const s = await fetchSettings()
-      if (s.blockedChannels.some(c => c.toLowerCase() === channel.toLowerCase())) return
+      if (s.blockedChannels.some(c => channelKey(c) === channelKey(channel))) {
+        setBlockedChannels(s.blockedChannels)
+        return
+      }
       const updated = [...s.blockedChannels, channel]
       await updateSettings({ blockedChannels: updated })
+      setBlockedChannels(updated)
       if (!showAllChannels) {
         setVideos(prev => prev.filter(v => v.channel.toLowerCase() !== channel.toLowerCase()))
       }
+    } catch (e: any) { alert(`Fehler: ${e.message}`) }
+  }
+
+  async function handleUnblock(video: YouTubeVideo) {
+    const keys = new Set(channelKeysOf(video))
+    if (keys.size === 0) return
+    try {
+      const s = await fetchSettings()
+      const updated = s.blockedChannels.filter(c => !keys.has(channelKey(c)))
+      if (updated.length === s.blockedChannels.length) {
+        setBlockedChannels(s.blockedChannels)
+        return
+      }
+      await updateSettings({ blockedChannels: updated })
+      setBlockedChannels(updated)
     } catch (e: any) { alert(`Fehler: ${e.message}`) }
   }
 
@@ -454,6 +486,7 @@ export default function BrowseView() {
               const isFailed = !doneId && !processingId && !!failedId
               const hasTts = !!(doneId && ttsIndex[doneId] && Object.keys(ttsIndex[doneId].variants).length > 0)
               const cardClickable = !!summaryId
+              const isBlocked = channelKeysOf(v).some(k => blockedKeys.has(k))
               return (
                 <div
                   key={v.id}
@@ -470,7 +503,19 @@ export default function BrowseView() {
                       <div>
                         <p className="text-xs text-slate-700 flex items-center gap-1.5">
                           {v.channel}
-                          {v.channel && <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><EyeOff className="w-3 h-3" /></button>}
+                          {v.channel && (
+                            isBlocked ? (
+                              <button
+                                onClick={e => { e.stopPropagation(); handleUnblock(v) }}
+                                title={`${v.channel} wieder einblenden`}
+                                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium text-danger bg-danger/10 border border-danger/30 rounded-md hover:bg-danger/20 transition-colors"
+                              >
+                                <EyeOff className="w-3 h-3" /> Ausgeblendet
+                              </button>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><Eye className="w-3 h-3" /></button>
+                            )
+                          )}
                         </p>
                         {v.publishedAt && <p className="text-[10px] text-slate-600 mt-0.5">{timeAgo(v.publishedAt)} · {v.uploadDate}</p>}
                       </div>

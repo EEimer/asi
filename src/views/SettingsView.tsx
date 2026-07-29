@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchSettings, updateSettings, resetTable, fetchCustomPrompts, createCustomPromptApi, updateCustomPromptApi, deleteCustomPromptApi } from '../api/endpoints'
 import type { CustomPrompt } from '../api/endpoints'
-import type { Settings, TtsModel, TtsVoice } from '../../shared/types'
-import { DEFAULT_SETTINGS } from '../../shared/types'
+import type { Settings, TtsModel, TtsVoice, ModelTier } from '../../shared/types'
+import { DEFAULT_SETTINGS, MODEL_OPTIONS, MODEL_TIER_LABELS, LEGACY_MODEL_LABELS } from '../../shared/types'
 import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle, Pencil } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
@@ -26,14 +26,7 @@ const BROWSER_OPTIONS = [
   { value: 'edge', label: 'Edge' },
 ]
 
-const MODEL_OPTIONS = [
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini (günstiger)' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'claude-opus-4-1', label: 'Claude Opus' },
-]
+const MODEL_TIERS: ModelTier[] = ['gut', 'mittel', 'beste']
 
 const TTS_MODEL_OPTIONS: { value: TtsModel; label: string; hint: string }[] = [
   { value: 'tts-1', label: 'tts-1', hint: 'Schnell, günstig (~$15/1M chars, ~$0.015/min)' },
@@ -241,8 +234,26 @@ export default function SettingsView() {
             <label className="block text-sm font-medium text-slate-800 mb-2">KI Modell</label>
             <select value={settings.openaiModel} onChange={e => setSettings(s => ({ ...s, openaiModel: e.target.value }))}
               className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
-              {MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {MODEL_TIERS.map(tier => (
+                <optgroup key={tier} label={MODEL_TIER_LABELS[tier]}>
+                  {MODEL_OPTIONS.filter(o => o.tier === tier).map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+              {/* Gespeichertes Altmodell sichtbar halten, sonst zeigt das Feld
+                  stillschweigend einen anderen Wert an als tatsächlich aktiv ist. */}
+              {!MODEL_OPTIONS.some(o => o.value === settings.openaiModel) && settings.openaiModel && (
+                <optgroup label="Aktuell gespeichert (nicht mehr in der Auswahl)">
+                  <option value={settings.openaiModel}>
+                    {LEGACY_MODEL_LABELS[settings.openaiModel] ?? settings.openaiModel}
+                  </option>
+                </optgroup>
+              )}
             </select>
+            <p className="mt-1 text-xs text-slate-500">
+              {MODEL_OPTIONS.find(o => o.value === settings.openaiModel)?.hint ?? 'Älteres Modell — auf eine aktuelle Stufe wechseln empfohlen.'}
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-800 mb-2">Parallele API-Requests</label>

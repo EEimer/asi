@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, ChatMessage, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
 
 export interface CustomPrompt {
   id: string
@@ -95,6 +95,37 @@ export async function updateAuthor(id: string, author: string): Promise<void> {
 export async function deleteSummary(id: string): Promise<void> {
   const res = await fetch(`${BASE}/summaries/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Delete error: ${res.status}`)
+}
+
+export async function fetchSummaryChat(id: string): Promise<ChatMessage[]> {
+  const res = await fetch(`${BASE}/summaries/${id}/chat`)
+  if (!res.ok) throw new Error(`Chat error: ${res.status}`)
+  return res.json()
+}
+
+export async function sendSummaryChatMessage(id: string, question: string, model: string): Promise<ChatMessage[]> {
+  const res = await fetch(`${BASE}/summaries/${id}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, model }),
+  })
+  if (!res.ok) {
+    // Provider-Fehler (Rate Limit, Context zu lang) steckt im Body — ohne ihn
+    // stünde im UI nur eine nackte Statuszahl.
+    const text = await res.text()
+    try {
+      const json = JSON.parse(text)
+      throw new Error(json.error ?? `Chat error: ${res.status}`)
+    } catch (e: any) {
+      throw new Error(e?.message ?? `Chat error: ${res.status}`)
+    }
+  }
+  return res.json()
+}
+
+export async function resetSummaryChat(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/summaries/${id}/chat`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Chat reset error: ${res.status}`)
 }
 
 export async function fetchSettings(): Promise<Settings> {

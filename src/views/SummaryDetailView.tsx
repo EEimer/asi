@@ -2,10 +2,12 @@ import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions, fetchSettings, fetchTtsIndex, generateTts, getTtsAudioUrl, fetchSummaries } from '../api/endpoints'
 import type { Summary, SummaryListItem, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
-import { ArrowLeft, ArrowRight, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send } from 'lucide-react'
+import { MODEL_OPTIONS, MODEL_TIER_LABELS, DEFAULT_SETTINGS, modelLabel } from '../../shared/types'
+import { ArrowLeft, ArrowRight, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send, MessageSquare } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
+import { SummaryChat } from '../components/SummaryChat'
 import { useToast } from '../store/toastStore'
 import { useAudioPlayer } from '../store/audioPlayerStore'
 
@@ -16,15 +18,6 @@ interface ParsedPrediction {
   price_target: string
 }
 
-const MODEL_OPTIONS = [
-  { value: 'gpt-4o', label: 'GPT-4o', shortLabel: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini', shortLabel: '4o Mini' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo', shortLabel: 'GPT-4 Turbo' },
-  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', shortLabel: 'Haiku' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', shortLabel: 'Sonnet' },
-  { value: 'claude-opus-4-1', label: 'Claude Opus', shortLabel: 'Opus' },
-]
-
 const TTS_CLASSIC_VOICES: TtsVoice[] = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']
 const TTS_EXTENDED_VOICES: TtsVoice[] = ['ballad', 'verse', 'marin', 'cedar']
 
@@ -34,12 +27,8 @@ interface TtsVariantDraft {
   instructions: string
 }
 
-function modelLabel(model: string): string {
-  return MODEL_OPTIONS.find(m => m.value === model)?.label ?? model
-}
-
 function modelShortLabel(model: string): string {
-  return MODEL_OPTIONS.find(m => m.value === model)?.shortLabel ?? model
+  return modelLabel(model)
 }
 
 function ttsModelShortLabel(model: TtsModel): string {
@@ -327,13 +316,14 @@ export default function SummaryDetailView() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(true)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [editingAuthor, setEditingAuthor] = useState(false)
   const [authorDraft, setAuthorDraft] = useState('')
   const [versions, setVersions] = useState<SummaryListItem[]>([])
   const [summaryOrder, setSummaryOrder] = useState<SummaryListItem[]>([])
   const [modelModalOpen, setModelModalOpen] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('gpt-4o')
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.openaiModel)
   const [creatingModelSummary, setCreatingModelSummary] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [ttsDefaults, setTtsDefaults] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
@@ -356,7 +346,7 @@ export default function SummaryDetailView() {
       try {
         const s = await fetchSummary(id)
         if (active) setSummary(s)
-        if (active) setSelectedModel(s.model || 'gpt-4o')
+        if (active) setSelectedModel(s.model || DEFAULT_SETTINGS.openaiModel)
         if (active && s.status === 'processing') setTimeout(load, 3000)
       } catch { /* ignore */ }
       finally { if (active) setLoading(false) }
@@ -393,7 +383,7 @@ export default function SummaryDetailView() {
       try {
         const s = await fetchSummary(id)
         setSummary(s)
-        setSelectedModel(s.model || 'gpt-4o')
+        setSelectedModel(s.model || DEFAULT_SETTINGS.openaiModel)
       } catch {
         /* ignore */
       }
@@ -675,15 +665,18 @@ export default function SummaryDetailView() {
     return player.isPlaying ? 'playing' : 'paused'
   }, [ttsLoading, summary?.id, player.track?.summaryId, player.isPlaying])
 
-  const { previousSummaryId, nextSummaryId } = useMemo(() => {
-    if (!id || !summaryOrder.length) return { previousSummaryId: null as string | null, nextSummaryId: null as string | null }
+  const { previousSummary, nextSummary } = useMemo(() => {
+    const empty = { previousSummary: null as SummaryListItem | null, nextSummary: null as SummaryListItem | null }
+    if (!id || !summaryOrder.length) return empty
     const currentIndex = summaryOrder.findIndex(item => item.id === id)
-    if (currentIndex < 0) return { previousSummaryId: null, nextSummaryId: null }
+    if (currentIndex < 0) return empty
     return {
-      previousSummaryId: summaryOrder[currentIndex - 1]?.id ?? null,
-      nextSummaryId: summaryOrder[currentIndex + 1]?.id ?? null,
+      previousSummary: summaryOrder[currentIndex - 1] ?? null,
+      nextSummary: summaryOrder[currentIndex + 1] ?? null,
     }
   }, [id, summaryOrder])
+  const previousSummaryId = previousSummary?.id ?? null
+  const nextSummaryId = nextSummary?.id ?? null
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -700,20 +693,36 @@ export default function SummaryDetailView() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between gap-4 mb-4">
         <button
           onClick={() => previousSummaryId && navigate(`/summaries/${previousSummaryId}`)}
           disabled={!previousSummaryId}
-          className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:border-slate-200 text-left"
         >
-          <ArrowLeft className="w-4 h-4" /> Vorheriger
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+            <ArrowLeft className="w-4 h-4" />
+          </span>
+          {previousSummary && (
+            <span className="hidden sm:block w-72 min-w-0">
+              <span className="block truncate text-xs font-medium leading-tight text-slate-700">{previousSummary.videoTitle || 'Ohne Titel'}</span>
+              <span className="block truncate text-[11px] leading-tight text-slate-400">{previousSummary.channelName}</span>
+            </span>
+          )}
         </button>
         <button
           onClick={() => nextSummaryId && navigate(`/summaries/${nextSummaryId}`)}
           disabled={!nextSummaryId}
-          className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:border-slate-200 text-right"
         >
-          Nächster <ArrowRight className="w-4 h-4" />
+          {nextSummary && (
+            <span className="hidden sm:block w-72 min-w-0">
+              <span className="block truncate text-xs font-medium leading-tight text-slate-700">{nextSummary.videoTitle || 'Ohne Titel'}</span>
+              <span className="block truncate text-[11px] leading-tight text-slate-400">{nextSummary.channelName}</span>
+            </span>
+          )}
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+            <ArrowRight className="w-4 h-4" />
+          </span>
         </button>
       </div>
 
@@ -772,6 +781,17 @@ export default function SummaryDetailView() {
           <div className="flex items-center gap-2">
             {summary.status === 'done' && (
               <>
+                <button
+                  onClick={() => setChatOpen(open => !open)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+                    chatOpen
+                      ? 'border-violet-300 text-violet-700 bg-violet-50'
+                      : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                  title={chatOpen ? 'Zurück zur Zusammenfassung' : 'Rückfragen zum Video stellen'}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" /> Chat
+                </button>
                 <button
                   onClick={() => { void handleTtsPlay() }}
                   disabled={ttsState === 'loading'}
@@ -863,7 +883,16 @@ export default function SummaryDetailView() {
             </div>
           )}
 
-          {summary.status === 'done' && (
+          {summary.status === 'done' && chatOpen && (
+            <SummaryChat
+              key={summary.id}
+              summaryId={summary.id}
+              summaryHtml={htmlParts.join('')}
+              summaryModel={summary.model}
+            />
+          )}
+
+          {summary.status === 'done' && !chatOpen && (
             <>
               {htmlParts.map((part, i) => (
                 <div key={i}>
@@ -1086,9 +1115,14 @@ export default function SummaryDetailView() {
                       : 'border-slate-200 text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <span>
-                  {option.label}
-                  {isUsed ? <span className="ml-2 text-[11px]">bereits genutzt</span> : null}
+                <span className="text-left">
+                  <span className="block">
+                    {option.label}
+                    {isUsed ? <span className="ml-2 text-[11px]">bereits genutzt</span> : null}
+                  </span>
+                  <span className={`block text-[11px] ${isUsed ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {MODEL_TIER_LABELS[option.tier]} · {option.hint}
+                  </span>
                 </span>
                 <span className={`w-4 h-4 rounded border inline-flex items-center justify-center ${isSelected ? 'border-primary bg-primary text-white' : 'border-slate-300'}`}>
                   {isSelected ? <Check className="w-3 h-3" /> : null}

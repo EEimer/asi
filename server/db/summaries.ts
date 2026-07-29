@@ -1,5 +1,5 @@
 import db from './database'
-import type { Summary, SummaryListItem } from '../../shared/types'
+import type { ChatMessage, Summary, SummaryListItem } from '../../shared/types'
 
 const LIST_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries ORDER BY created_at DESC`
 
@@ -69,9 +69,33 @@ export function updateSummaryError(id: string, errorMessage: string) {
 
 export function resetSummaryForRetry(id: string): boolean {
   const result = db.query(
-    'UPDATE summaries SET status = ?, error_message = NULL, transcript = NULL, summary = NULL, custom_prompt = NULL WHERE id = ?',
+    `UPDATE summaries SET status = ?, error_message = NULL, transcript = NULL, summary = NULL, custom_prompt = NULL, chat = '[]' WHERE id = ?`,
   ).run('processing', id)
   return result.changes > 0
+}
+
+/**
+ * Der Chat liegt als JSON-Blob in der Spalte `chat` — bewusst nicht in
+ * LIST_QUERY/DETAIL_QUERY, damit er weder die Listen-Payload aufbläht noch beim
+ * Status-Polling der Detailansicht mitgeschleift wird.
+ */
+export function getSummaryChat(id: string): ChatMessage[] {
+  const row = db.query('SELECT chat FROM summaries WHERE id = ?').get(id) as { chat: string | null } | null
+  if (!row?.chat) return []
+  try {
+    const parsed = JSON.parse(row.chat)
+    return Array.isArray(parsed) ? parsed as ChatMessage[] : []
+  } catch {
+    return []
+  }
+}
+
+export function saveSummaryChat(id: string, messages: ChatMessage[]): void {
+  db.query('UPDATE summaries SET chat = ? WHERE id = ?').run(JSON.stringify(messages), id)
+}
+
+export function clearSummaryChat(id: string): void {
+  db.query(`UPDATE summaries SET chat = '[]' WHERE id = ?`).run(id)
 }
 
 export function deleteSummary(id: string): boolean {

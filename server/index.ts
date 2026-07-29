@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { cors } from '@elysiajs/cors'
-import { getAllSummaries, getSummariesPage, getSummariesCount, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds } from './db/summaries'
+import { getAllSummaries, getSummariesPage, getSummariesCount, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds, getSummaryChat, saveSummaryChat, clearSummaryChat } from './db/summaries'
 import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
 import { getAllCustomPrompts, createCustomPrompt, updateCustomPrompt, deleteCustomPrompt } from './db/customPrompts'
 import { getAllPredictions, insertPredictions, insertManualPrediction, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
@@ -10,11 +10,12 @@ import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSub
 import { fetchXMeta, fetchXContent, extractXId } from './services/xcom'
 import { getAllXSummaries, getXSummaryById, createXSummary, updateXSummaryDone, updateXSummaryError, resetXSummaryForRetry, deleteXSummary } from './db/xSummaries'
 import { summarizeTranscript } from './services/summarizer'
+import { answerSummaryQuestion } from './services/chat'
 import { loadSettings } from './config'
 import { clearAllTts, deleteTtsBySummary, ensureTtsStorage, getOrGenerateTts, getTtsIndex, resolveTtsFilePath } from './services/tts'
 import { sendAudioToTelegram } from './services/telegram'
 import { setApiConcurrency } from './services/retry'
-import { DEFAULT_SETTINGS, type ProcessingEvent, type TtsModel, type TtsVoice } from '../shared/types'
+import { DEFAULT_SETTINGS, type ChatMessage, type ProcessingEvent, type TtsModel, type TtsVoice } from '../shared/types'
 import { existsSync } from 'node:fs'
 
 const port = Number(process.env.PORT ?? 8788)
@@ -234,6 +235,56 @@ const app = new Elysia()
     emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
     processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '')
     return { ok: true, id: summary.id, status: 'processing' }
+  })
+
+  // Nachfrage-Chat zu einer Zusammenfassung
+  .get('/api/summaries/:id/chat', ({ params }) => {
+    const summary = getSummaryById(params.id)
+    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    return getSummaryChat(params.id)
+  })
+
+  .post('/api/summaries/:id/chat', async ({ body, params }) => {
+    const summary = getSummaryById(params.id)
+    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+
+    const question = body.question.trim()
+    if (!question) return new Response(JSON.stringify({ error: 'Frage ist leer' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+
+    const model = body.model || summary.model || loadSettings().openaiModel
+    const history = getSummaryChat(params.id)
+    const now = new Date().toISOString()
+
+    try {
+      const answer = await answerSummaryQuestion({
+        model,
+        videoTitle: summary.videoTitle,
+        channelName: summary.channelName,
+        transcript: summary.transcript ?? '',
+        summary: summary.summary ?? '',
+        history,
+        question,
+      })
+
+      const messages: ChatMessage[] = [
+        ...history,
+        { id: `msg_${Date.now()}_user`, role: 'user', content: question, createdAt: now },
+        { id: `msg_${Date.now()}_assistant`, role: 'assistant', content: answer, model, createdAt: new Date().toISOString() },
+      ]
+      saveSummaryChat(params.id, messages)
+      return messages
+    } catch (e: any) {
+      const message = e?.message ?? 'Chat-Anfrage fehlgeschlagen'
+      console.error(`[chat error] ${params.id}: ${message}`)
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
+  }, { body: t.Object({ question: t.String(), model: t.Optional(t.String()) }) })
+
+  .delete('/api/summaries/:id/chat', ({ params }) => {
+    const summary = getSummaryById(params.id)
+    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    clearSummaryChat(params.id)
+    return { ok: true }
   })
 
   .delete('/api/summaries/:id', ({ params }) => {

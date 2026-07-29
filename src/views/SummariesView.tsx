@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchSummariesPaged, deleteSummary, retrySummary, fetchSettings, fetchTtsIndex, generateTts, getTtsAudioUrl } from '../api/endpoints'
 import type { SummaryListItem, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
+import { modelLabel } from '../../shared/types'
 import { Clock, Trash2, ExternalLink, Loader2, FileText, AlertCircle, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
@@ -15,15 +16,6 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 const PAGE_SIZE = 20
 
 const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag']
-const MODEL_LABELS: Record<string, string> = {
-  'gpt-4o': 'GPT-4o',
-  'gpt-4o-mini': '4o Mini',
-  'gpt-4-turbo': 'GPT-4 Turbo',
-  'claude-haiku-4-5': 'Haiku',
-  'claude-sonnet-4-6': 'Sonnet',
-  'claude-opus-4-1': 'Opus',
-}
-
 const TTS_CLASSIC_VOICES: TtsVoice[] = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']
 const TTS_EXTENDED_VOICES: TtsVoice[] = ['ballad', 'verse', 'marin', 'cedar']
 
@@ -34,7 +26,7 @@ interface TtsVariantDraft {
 }
 
 function modelShortLabel(model: string): string {
-  return MODEL_LABELS[model] ?? model
+  return modelLabel(model)
 }
 
 function ttsVoiceOptions(model: TtsModel): TtsVoice[] {
@@ -58,9 +50,36 @@ function variantMatches(entry: { model: string; voice: string; instructions: str
     && normalizeInstructions(entry.instructions) === normalizeInstructions(draft.instructions)
 }
 
-function extractTldr(summary: string): string {
-  const match = summary.match(/##\s*TLDR\s*\n([\s\S]*?)(?=\n##\s|\n---|\s*$)/)
-  return match ? match[1].trim() : summary
+const EXCERPT_SENTENCES = 5
+const EXCERPT_MAX_CHARS = 300
+
+/**
+ * Vorschautext für die Karten: die ersten Sätze der Zusammenfassung, von
+ * Markdown befreit. Bewusst inhaltsbasiert statt an einen Abschnitt gebunden —
+ * so bleibt die Vorschau auch dann heil, wenn sich der Prompt ändert.
+ */
+function summaryExcerpt(summary: string): string {
+  // Metadaten-Kopf überspringen: Titel und Kanal stehen bereits auf der Karte.
+  const firstSection = summary.search(/^##\s+/m)
+  const body = firstSection >= 0 ? summary.slice(firstSection) : summary
+
+  const plain = body
+    .replace(/```[\s\S]*?```/g, ' ')      // Codeblöcke (Assets-JSON)
+    .replace(/^#{1,6}\s.*$/gm, ' ')       // Überschriften
+    .replace(/^\s*-{3,}\s*$/gm, ' ')      // Trennlinien
+    .replace(/^\s*[-*+]\s+/gm, '')        // Listenmarker
+    .replace(/\*\*|__|[*_`]/g, '')        // Betonungen
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!plain) return ''
+
+  // Satzgrenze nur bei Satzzeichen + Leerraum + neuem Satzanfang. Ohne den
+  // Leerraum bliebe "120.000" mitten im Satz stehen und würde ihn zerreißen.
+  const sentences = plain.split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ„"»(])/)
+  let text = sentences.slice(0, EXCERPT_SENTENCES).join(' ').trim()
+  if (text.length > EXCERPT_MAX_CHARS) text = text.slice(0, EXCERPT_MAX_CHARS).replace(/\s+\S*$/, '')
+
+  return text.length < plain.length ? `${text} …` : text
 }
 
 function formatDateKey(dateStr: string): string {
@@ -399,7 +418,7 @@ export default function SummariesView() {
                           {s.channelName}
                           {s.author && s.author !== s.channelName && <span className="text-slate-400"> · {s.author}</span>}
                         </p>
-                        {s.status === 'done' && s.summary && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{extractTldr(s.summary).slice(0, 200)}</p>}
+                        {s.status === 'done' && s.summary && <p className="text-xs text-slate-600 mt-2 line-clamp-3">{summaryExcerpt(s.summary)}</p>}
                         {s.status === 'error' && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{s.errorMessage?.slice(0, 100)}</p>}
                         <div className="flex items-center gap-3 mt-2">
                           <span className="flex items-center gap-1 text-[10px] text-slate-400">
