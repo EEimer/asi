@@ -79,6 +79,43 @@ function cookieArgs(browser: string): string[] {
   return ['--cookies-from-browser', browser]
 }
 
+const HTTP_TIMEOUT_MS = 15_000
+
+// Harte Obergrenze für einen yt-dlp-Aufruf.
+//
+// `proc.kill()` allein genügt nicht: mit `--js-runtimes deno:…` startet yt-dlp
+// einen Deno-Subprozess, der die stdout-Pipe erbt. Stirbt nur yt-dlp, bleibt die
+// Pipe durch das Enkelkind offen und `new Response(proc.stdout).text()` wartet
+// ewig auf EOF. Darum wird zusätzlich gegen eine Deadline gerannt und das
+// Leseergebnis notfalls verworfen.
+async function runYtDlp(args: string[], timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' })
+
+  const collect = (async () => {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    return { exitCode: proc.exitCode ?? -1, stdout, stderr }
+  })()
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`yt-dlp timeout nach ${Math.round(timeoutMs / 1000)}s`)),
+      timeoutMs,
+    )
+  })
+
+  try {
+    return await Promise.race([collect, deadline])
+  } finally {
+    clearTimeout(timer)
+    if (proc.exitCode === null) proc.kill('SIGKILL')
+  }
+}
+
 export function extractVideoId(url: string): string {
   const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
   return match?.[1] ?? url
@@ -89,10 +126,24 @@ let feedFetchedAt = 0
 let feedFetching: Promise<void> | null = null
 let feedExhausted = false
 const FEED_TTL_MS = 5 * 60 * 1000
+const FEED_REFRESH_TIMEOUT_MS = 3 * 60 * 1000
+
+function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} nach ${Math.round(ms / 1000)}s abgebrochen (Timeout)`)),
+      ms,
+    )
+  })
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer)) as Promise<T>
+}
 
 async function fetchOembedMeta(videoId: string): Promise<{ title: string; channel: string; thumbnail: string }> {
   try {
-    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
+    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    })
     if (!res.ok) return { title: '', channel: '', thumbnail: '' }
     const data = await res.json() as any
     return {
@@ -120,20 +171,19 @@ async function fetchChannelIds(): Promise<{ id: string; name: string; url: strin
     const browserArgs = cookieArgs(browser)
     if (browserArgs.length === 0) continue
 
-    const proc = Bun.spawn(
-      [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', '--skip-download', ...browserArgs, 'https://www.youtube.com/feed/channels'],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const killTimer = setTimeout(() => proc.kill(), 30_000)
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(killTimer)
-
-    if (proc.exitCode !== 0) {
-      lastError = `browser=${browser} error=${stderr.slice(0, 500)}`
+    let stdout: string
+    try {
+      const res = await runYtDlp(
+        [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', '--skip-download', ...browserArgs, 'https://www.youtube.com/feed/channels'],
+        30_000,
+      )
+      if (res.exitCode !== 0) {
+        lastError = `browser=${browser} error=${res.stderr.slice(0, 500)}`
+        continue
+      }
+      stdout = res.stdout
+    } catch (e: any) {
+      lastError = `browser=${browser} ${e?.message ?? 'unbekannter Fehler'}`
       continue
     }
 
@@ -157,7 +207,9 @@ async function fetchChannelIds(): Promise<{ id: string; name: string; url: strin
 
 async function fetchRssFeed(channelId: string, channelName: string, channelUrl: string): Promise<YouTubeVideo[]> {
   try {
-    const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`)
+    const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`, {
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    })
     if (!res.ok) return []
     const xml = await res.text()
     const entries: YouTubeVideo[] = []
@@ -191,14 +243,10 @@ async function fetchDurationMap(browserArgs: string[]): Promise<{ durations: Map
   const durations = new Map<string, { duration: number; durationFormatted: string }>()
   const shortIds = new Set<string>()
   try {
-    const proc = Bun.spawn(
+    const { stdout } = await runYtDlp(
       [YT_DLP, ...ytdlpBaseArgs(), '--flat-playlist', '--dump-json', '--skip-download', ...browserArgs, '--playlist-end', '200', ':ytsubs'],
-      { stdout: 'pipe', stderr: 'pipe' },
+      30_000,
     )
-    const killTimer = setTimeout(() => proc.kill(), 30_000)
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    clearTimeout(killTimer)
     for (const line of stdout.split('\n').filter(l => l.trim())) {
       try {
         const j = JSON.parse(line)
@@ -259,7 +307,11 @@ export async function fetchSubscriptionFeed(offset = 0, limit = 30): Promise<{ v
 
   if (feedCache.length === 0 || (cacheStale && offset === 0)) {
     if (!feedFetching) {
-      feedFetching = refreshFeedCache(0).finally(() => { feedFetching = null })
+      // Deadline um den kompletten Refresh: bleibt er trotz aller Einzel-
+      // Timeouts hängen, würde `feedFetching` sonst nie wieder auf null gesetzt
+      // und *jeder* weitere Feed-Request wartet für immer auf diese eine Promise.
+      feedFetching = withDeadline(refreshFeedCache(0), FEED_REFRESH_TIMEOUT_MS, 'Feed-Refresh')
+        .finally(() => { feedFetching = null })
     }
     await feedFetching
   }
