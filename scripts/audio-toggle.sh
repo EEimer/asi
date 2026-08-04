@@ -15,6 +15,13 @@
 #   audio-toggle.sh speakers
 #   audio-toggle.sh status      -> nur ausgeben, nichts ändern
 #
+# Tastenkombinationen (je eine Schnellaktion pro Ziel, kein Weiterschalten):
+#   ⌃⇧⌘Q  headphones
+#   ⌃⇧⌘A  builtin
+#   ⌃⇧⌘Z  speakers
+# Gebaut und installiert von rebuild-quickaction.sh — nach jeder Änderung hier
+# unbedingt `./rebuild-quickaction.sh --install` ausführen.
+#
 # Voraussetzung (einmalig):  brew install switchaudio-osx
 #
 # NICHT nach bar/ verschieben — das ist der SwiftBar-Plugin-Ordner, dort würde

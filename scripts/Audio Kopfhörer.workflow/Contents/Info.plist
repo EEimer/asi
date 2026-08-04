@@ -8,7 +8,7 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>Audio umschalten</string>
+				<string>Audio Kopfhörer</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>runWorkflowAsService</string>

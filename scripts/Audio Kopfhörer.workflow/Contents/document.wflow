@@ -59,7 +59,10 @@
 				<key>ActionParameters</key>
 				<dict>
 					<key>COMMAND_STRING</key>
-					<string>#
+					<string># Von rebuild-quickaction.sh erzeugt — fester Modus dieser Aktion.
+set -- headphones
+
+#
 # audio-toggle.sh
 # Schaltet Audio-Ein- und -Ausgang zwischen drei Zielen um.
 #
@@ -74,6 +77,13 @@
 #   audio-toggle.sh headphones
 #   audio-toggle.sh speakers
 #   audio-toggle.sh status      -&gt; nur ausgeben, nichts ändern
+#
+# Tastenkombinationen (je eine Schnellaktion pro Ziel, kein Weiterschalten):
+#   ⌃⇧⌘Q  headphones
+#   ⌃⇧⌘A  builtin
+#   ⌃⇧⌘Z  speakers
+# Gebaut und installiert von rebuild-quickaction.sh — nach jeder Änderung hier
+# unbedingt `./rebuild-quickaction.sh --install` ausführen.
 #
 # Voraussetzung (einmalig):  brew install switchaudio-osx
 #
@@ -231,7 +241,7 @@ exit 0
 				<key>Class Name</key>
 				<string>RunShellScriptAction</string>
 				<key>InputUUID</key>
-				<string>7E3F0C42-1A55-4B6E-9C21-8D4A5F0B3E17</string>
+				<string>45D14AD4-89ED-5471-9F43-D727B5AE2F2F</string>
 				<key>Keywords</key>
 				<array>
 					<string>Shell</string>
@@ -241,9 +251,9 @@ exit 0
 					<string>Unix</string>
 				</array>
 				<key>OutputUUID</key>
-				<string>2B9D6E10-77C4-4A38-8F52-C1E60A9D4B83</string>
+				<string>8E83479D-682D-526C-B962-26FE66DC0B6B</string>
 				<key>UUID</key>
-				<string>D4A81F63-5C29-4E7B-B016-9A3F2D8C5E40</string>
+				<string>E41A2D84-C01B-5E70-BFA4-1DB5A20C5445</string>
 				<key>UnlocalizedApplications</key>
 				<array>
 					<string>Automator</string>

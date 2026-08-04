@@ -4,8 +4,16 @@ Wechselt Audio-Ein- und -Ausgang gemeinsam zwischen drei Zielen. Hintergrund:
 Am Monitor ist das MacBook zugeklappt, interne Lautsprecher und Mikrofon sind
 dann nicht nutzbar.
 
-Bedienbar per Tastenkombination **⌃⇧⌘A**, über das SwiftBar-Plugin
-`../bar/bar.sh` (Eintrag „Ausgabe ändern (⌃⇧⌘A)") oder direkt im Terminal.
+Jedes Ziel hat eine eigene Tastenkombination — es wird **nicht** weiter-
+geschaltet, dieselbe Taste führt immer zum selben Gerät:
+
+| Taste | Ziel |
+|---|---|
+| **⌃⇧⌘Q** | 🎧 Kopfhörer |
+| **⌃⇧⌘A** | 💻 MacBook intern |
+| **⌃⇧⌘Z** | 🔊 Lautsprecher (USB) |
+
+Alternativ über das SwiftBar-Plugin `../bar/bar.sh` oder direkt im Terminal.
 
 > **Nicht nach `bar/` verschieben.** Dieser Ordner ist der SwiftBar-Plugin-
 > Ordner. SwiftBar führt dort jede ausführbare Datei zyklisch aus — und
@@ -25,8 +33,10 @@ brew install switchaudio-osx
 | Datei | Zweck |
 |---|---|
 | `audio-toggle.sh` | Das eigentliche Skript — einzige Quelle der Wahrheit |
-| `rebuild-quickaction.sh` | Baut die Schnellaktion neu und bettet das Skript ein |
-| `Audio umschalten.workflow` | Die Schnellaktion für die Tastenkombination |
+| `rebuild-quickaction.sh` | Baut die drei Schnellaktionen, bettet das Skript ein, setzt die Tasten |
+| `Audio Kopfhörer.workflow` | Schnellaktion für ⌃⇧⌘Q |
+| `Audio MacBook.workflow` | Schnellaktion für ⌃⇧⌘A |
+| `Audio Lautsprecher.workflow` | Schnellaktion für ⌃⇧⌘Z |
 | `../bar/bar.sh` | SwiftBar-Plugin, ruft `audio-toggle.sh` per Pfad auf |
 
 ## Drei Ziele
@@ -37,8 +47,10 @@ brew install switchaudio-osx
 | `headphones` | External Headphones | Mikrofon der Kopfhörer |
 | `speakers` | USB Audio DAC | bleibt unverändert |
 
-Ohne Argument wird weitergeschaltet: builtin → headphones → speakers → builtin.
-Nicht angeschlossene Geräte werden übersprungen.
+Die Tastenkombis wählen jeweils genau einen dieser Modi. Ohne Argument im
+Terminal (oder über den Menüeintrag „Weiterschalten") wird zyklisch
+weitergeschaltet: builtin → headphones → speakers → builtin. Nicht
+angeschlossene Geräte werden dabei übersprungen.
 
 ## Direkt aufrufen
 
@@ -50,12 +62,13 @@ Nicht angeschlossene Geräte werden übersprungen.
 ./audio-toggle.sh status       # anzeigen was aktiv und was verfügbar ist
 ```
 
-## Wichtig: Skript geändert? Schnellaktion neu bauen
+## Wichtig: Skript geändert? Schnellaktionen neu bauen
 
-Die Schnellaktion enthält eine **eingebettete Kopie** von `audio-toggle.sh`,
+Jede Schnellaktion enthält eine **eingebettete Kopie** von `audio-toggle.sh`,
 keinen Verweis darauf. Grund: macOS verweigert Automator-Diensten den Zugriff
 auf `~/Documents` — ein Dienst, der das Skript per Pfad aufruft, scheitert mit
-*„Operation not permitted"*.
+*„Operation not permitted"*. Der Modus wird beim Bauen als `set -- <modus>`
+vorangestellt, deshalb schaltet keine der drei Aktionen weiter.
 
 Nach jeder Änderung an `audio-toggle.sh` also:
 
@@ -63,19 +76,29 @@ Nach jeder Änderung an `audio-toggle.sh` also:
 ./rebuild-quickaction.sh --install
 ```
 
-Das baut die Schnellaktion neu, kopiert sie nach `~/Library/Services` und
-meldet den Dienst beim System an. Die Tastenkombination bleibt erhalten.
+Das baut alle drei Schnellaktionen neu, kopiert sie nach `~/Library/Services`,
+setzt die Tastenkombinationen und meldet die Dienste beim System an.
 
 Das SwiftBar-Plugin ruft `audio-toggle.sh` normal per Pfad auf und braucht
 keinen Rebuild — SwiftBar hat den Ordnerzugriff.
 
-## Tastenkombination ⌃⇧⌘A
+## Tastenkombinationen
 
-Ist eingerichtet. Falls sie neu zugewiesen werden muss:
+`rebuild-quickaction.sh --install` setzt sie selbst, über die Domain `pbs`
+(`NSServicesStatus`, Modifier-Kürzel: `@` cmd, `^` ctrl, `$` shift, `~` option).
+Prüfen lässt sich das mit:
 
-Systemeinstellungen → Tastatur → **Keyboard Shortcuts…** → **Services** →
-Kategorie **General** → „Audio umschalten" → Häkchen setzen, doppelt auf die
-rechte Spalte klicken und die Kombination drücken.
+```
+defaults read pbs NSServicesStatus
+```
+
+Greift eine Kombi in einer schon offenen App nicht, diese App einmal neu
+starten — Services-Shortcuts werden beim App-Start eingelesen.
+
+Andere Tasten gewünscht? In `rebuild-quickaction.sh` das Array `MODES` anpassen
+und `--install` erneut laufen lassen. Von Hand geht es auch: Systemeinstellungen
+→ Tastatur → **Keyboard Shortcuts…** → **Services** → Kategorie **General** →
+„Audio Kopfhörer" / „Audio MacBook" / „Audio Lautsprecher".
 
 ## Gerätesuche
 

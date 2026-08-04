@@ -95,9 +95,12 @@ else
   echo "-- Ausgabe: $AUDIO_OUT | size=12 color=#888888"
   echo "-- Eingabe: $AUDIO_IN | size=12 color=#888888"
   echo "-----"
-  echo "-- 🔊 Lautsprecher (USB) | shell='$AUDIO_TOGGLE' param1='speakers' terminal=false refresh=true"
-  echo "-- 🎧 Kopfhörer | shell='$AUDIO_TOGGLE' param1='headphones' terminal=false refresh=true"
-  echo "-- 💻 MacBook intern | shell='$AUDIO_TOGGLE' param1='builtin' terminal=false refresh=true"
+  echo "-- 🔀 Weiterschalten | shell='$AUDIO_TOGGLE' terminal=false refresh=true"
 
-  echo "🔀 Ausgabe ändern (⌃⇧⌘A) | shell='$AUDIO_TOGGLE' terminal=false refresh=true key=ctrl+shift+cmd+a"
+  # Die Tastenkombis kommen von den Schnellaktionen in ~/Library/Services
+  # (siehe scripts/rebuild-quickaction.sh) — hier bewusst kein key=, sonst
+  # registrieren SwiftBar und der Dienst dieselbe Kombi doppelt.
+  echo "🎧 Kopfhörer (⌃⇧⌘Q) | shell='$AUDIO_TOGGLE' param1='headphones' terminal=false refresh=true"
+  echo "💻 MacBook intern (⌃⇧⌘A) | shell='$AUDIO_TOGGLE' param1='builtin' terminal=false refresh=true"
+  echo "🔊 Lautsprecher (⌃⇧⌘Z) | shell='$AUDIO_TOGGLE' param1='speakers' terminal=false refresh=true"
 fi

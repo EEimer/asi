@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMApplicationBuild</key>
+	<string>528</string>
+	<key>AMApplicationVersion</key>
+	<string>2.10</string>
+	<key>AMDocumentVersion</key>
+	<string>2</string>
+	<key>actions</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<dict>
+				<key>AMAccepts</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Optional</key>
+					<true/>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>AMActionVersion</key>
+				<string>2.0.3</string>
+				<key>AMApplication</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>AMParameterProperties</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<dict/>
+					<key>CheckedForUserDefaultShell</key>
+					<dict/>
+					<key>inputMethod</key>
+					<dict/>
+					<key>shell</key>
+					<dict/>
+					<key>source</key>
+					<dict/>
+				</dict>
+				<key>AMProvides</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>ActionBundlePath</key>
+				<string>/System/Library/Automator/Run Shell Script.action</string>
+				<key>ActionName</key>
+				<string>Run Shell Script</string>
+				<key>ActionParameters</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<string># Von rebuild-quickaction.sh erzeugt — fester Modus dieser Aktion.
+set -- speakers
+
+#
+# audio-toggle.sh
+# Schaltet Audio-Ein- und -Ausgang zwischen drei Zielen um.
+#
+# Ziele:
+#   builtin     MacBook-Lautsprecher + MacBook-Mikrofon
+#   headphones  Kopfhörer am Klinkenanschluss + dessen Mikrofon
+#   speakers    USB Audio DAC (Schreibtisch-Lautsprecher), Eingang bleibt
+#
+# Aufruf:
+#   audio-toggle.sh             -&gt; weiterschalten (builtin -&gt; headphones -&gt; speakers -&gt; ...)
+#   audio-toggle.sh builtin
+#   audio-toggle.sh headphones
+#   audio-toggle.sh speakers
+#   audio-toggle.sh status      -&gt; nur ausgeben, nichts ändern
+#
+# Tastenkombinationen (je eine Schnellaktion pro Ziel, kein Weiterschalten):
+#   ⌃⇧⌘Q  headphones
+#   ⌃⇧⌘A  builtin
+#   ⌃⇧⌘Z  speakers
+# Gebaut und installiert von rebuild-quickaction.sh — nach jeder Änderung hier
+# unbedingt `./rebuild-quickaction.sh --install` ausführen.
+#
+# Voraussetzung (einmalig):  brew install switchaudio-osx
+#
+# NICHT nach bar/ verschieben — das ist der SwiftBar-Plugin-Ordner, dort würde
+# das Skript zyklisch ausgeführt und dauernd umschalten.
+#
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+SAS="$(command -v SwitchAudioSource)"
+
+notify() {
+  osascript -e "display notification \"$2\" with title \"$1\"" &gt;/dev/null 2&gt;&amp;1
+}
+
+if [ -z "$SAS" ]; then
+  notify "Audio-Umschalter" "SwitchAudioSource fehlt — installieren mit: brew install switchaudio-osx"
+  echo "Fehler: SwitchAudioSource nicht gefunden. Installieren mit: brew install switchaudio-osx" &gt;&amp;2
+  exit 1
+fi
+
+# --- Geräte anhand von Mustern finden (keine fest verdrahteten Namen) ---------
+
+pick() { grep -i -m1 -E "$1"; }
+
+OUTPUTS=$("$SAS" -a -t output)
+INPUTS=$("$SAS"  -a -t input)
+
+BI_OUT=$(echo "$OUTPUTS" | pick 'macbook.*(speaker|lautsprecher)|built-?in.*(output|speaker)')
+BI_IN=$(echo  "$INPUTS"  | pick 'macbook.*(micro|mikro)|built-?in.*(micro|mikro)')
+
+HP_OUT=$(echo "$OUTPUTS" | pick 'headphone|kopfhörer')
+HP_IN=$(echo  "$INPUTS"  | pick 'external.*(mic|mikro)|headset|kopfhörer')
+
+SP_OUT=$(echo "$OUTPUTS" | pick 'usb audio|usb.*dac|\bdac\b|usb.*(speaker|lautsprecher)')
+
+CUR_OUT=$("$SAS" -c -t output)
+CUR_IN=$("$SAS"  -c -t input)
+
+# --- Modus des aktuellen Ausgabegeräts bestimmen ------------------------------
+
+current_mode() {
+  [ -n "$SP_OUT" ] &amp;&amp; [ "$CUR_OUT" = "$SP_OUT" ] &amp;&amp; { echo "speakers"; return; }
+  [ -n "$HP_OUT" ] &amp;&amp; [ "$CUR_OUT" = "$HP_OUT" ] &amp;&amp; { echo "headphones"; return; }
+  [ -n "$BI_OUT" ] &amp;&amp; [ "$CUR_OUT" = "$BI_OUT" ] &amp;&amp; { echo "builtin"; return; }
+  echo "unknown"
+}
+
+# --- Zielmodus bestimmen ------------------------------------------------------
+
+MODE="$1"
+
+if [ "$MODE" = "status" ]; then
+  echo "Modus:   $(current_mode)"
+  echo "Ausgabe: ${CUR_OUT:-?}"
+  echo "Eingabe: ${CUR_IN:-?}"
+  echo
+  echo "Verfügbar:"
+  [ -n "$BI_OUT" ] &amp;&amp; echo "  builtin     $BI_OUT"
+  [ -n "$HP_OUT" ] &amp;&amp; echo "  headphones  $HP_OUT"
+  [ -n "$SP_OUT" ] &amp;&amp; echo "  speakers    $SP_OUT"
+  exit 0
+fi
+
+if [ -z "$MODE" ] || [ "$MODE" = "toggle" ]; then
+  # Nur tatsächlich vorhandene Ziele in fester Reihenfolge durchlaufen
+  CYCLE=()
+  [ -n "$BI_OUT" ] &amp;&amp; CYCLE+=("builtin")
+  [ -n "$HP_OUT" ] &amp;&amp; CYCLE+=("headphones")
+  [ -n "$SP_OUT" ] &amp;&amp; CYCLE+=("speakers")
+
+  if [ ${#CYCLE[@]} -eq 0 ]; then
+    notify "Audio-Umschalter" "Kein bekanntes Ausgabegerät gefunden."
+    exit 1
+  fi
+
+  CUR_MODE=$(current_mode)
+  MODE="${CYCLE[0]}"
+  for i in "${!CYCLE[@]}"; do
+    if [ "${CYCLE[$i]}" = "$CUR_MODE" ]; then
+      MODE="${CYCLE[$(( (i + 1) % ${#CYCLE[@]} ))]}"
+      break
+    fi
+  done
+fi
+
+# --- Umschalten ---------------------------------------------------------------
+
+case "$MODE" in
+  headphones)
+    [ -z "$HP_OUT" ] &amp;&amp; { notify "Audio-Umschalter" "Keine Kopfhörer gefunden — steckt der Klinkenstecker?"; exit 1; }
+    TARGET_OUT="$HP_OUT"
+    TARGET_IN="${HP_IN:-$BI_IN}"
+    LABEL="Kopfhörer"
+    ;;
+  builtin)
+    [ -z "$BI_OUT" ] &amp;&amp; { notify "Audio-Umschalter" "Interne Lautsprecher nicht gefunden."; exit 1; }
+    TARGET_OUT="$BI_OUT"
+    TARGET_IN="$BI_IN"
+    LABEL="MacBook intern"
+    ;;
+  speakers)
+    [ -z "$SP_OUT" ] &amp;&amp; { notify "Audio-Umschalter" "USB-Lautsprecher nicht gefunden — eingeschaltet und verbunden?"; exit 1; }
+    TARGET_OUT="$SP_OUT"
+    TARGET_IN=""   # Eingang bewusst unverändert lassen
+    LABEL="Lautsprecher"
+    ;;
+  *)
+    echo "Unbekannter Modus: $MODE" &gt;&amp;2
+    echo "Erlaubt: toggle | builtin | headphones | speakers | status" &gt;&amp;2
+    exit 2
+    ;;
+esac
+
+"$SAS" -s "$TARGET_OUT" -t output &gt;/dev/null 2&gt;&amp;1
+[ -n "$TARGET_IN" ] &amp;&amp; "$SAS" -s "$TARGET_IN" -t input &gt;/dev/null 2&gt;&amp;1
+
+# Systemtöne auf dasselbe Ausgabegerät; schlägt still fehl, falls nicht unterstützt
+"$SAS" -s "$TARGET_OUT" -t system &gt;/dev/null 2&gt;&amp;1
+
+# --- Rückmeldung --------------------------------------------------------------
+
+NEW_OUT=$("$SAS" -c -t output)
+NEW_IN=$("$SAS"  -c -t input)
+
+notify "Audio → $LABEL" "Aus: $NEW_OUT · Ein: $NEW_IN"
+echo "Ausgabe: $NEW_OUT"
+echo "Eingabe: $NEW_IN"
+
+open -g "swiftbar://refreshallplugins" &gt;/dev/null 2&gt;&amp;1
+
+exit 0
+</string>
+					<key>CheckedForUserDefaultShell</key>
+					<true/>
+					<key>inputMethod</key>
+					<integer>0</integer>
+					<key>shell</key>
+					<string>/bin/bash</string>
+					<key>source</key>
+					<string></string>
+				</dict>
+				<key>BundleIdentifier</key>
+				<string>com.apple.RunShellScript</string>
+				<key>CFBundleVersion</key>
+				<string>2.0.3</string>
+				<key>CanShowSelectedItemsWhenRun</key>
+				<false/>
+				<key>CanShowWhenRun</key>
+				<true/>
+				<key>Category</key>
+				<array>
+					<string>AMCategoryUtilities</string>
+				</array>
+				<key>Class Name</key>
+				<string>RunShellScriptAction</string>
+				<key>InputUUID</key>
+				<string>774219DE-9CFA-5260-AA0B-A3A2CBC482B9</string>
+				<key>Keywords</key>
+				<array>
+					<string>Shell</string>
+					<string>Script</string>
+					<string>Command</string>
+					<string>Run</string>
+					<string>Unix</string>
+				</array>
+				<key>OutputUUID</key>
+				<string>DE4D5C34-08D1-542D-8975-DB493BE5B7ED</string>
+				<key>UUID</key>
+				<string>6A747274-1FF9-552B-86F1-46954313A607</string>
+				<key>UnlocalizedApplications</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>arguments</key>
+				<dict>
+					<key>0</key>
+					<dict>
+						<key>default value</key>
+						<integer>0</integer>
+						<key>name</key>
+						<string>inputMethod</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>0</string>
+					</dict>
+					<key>1</key>
+					<dict>
+						<key>default value</key>
+						<false/>
+						<key>name</key>
+						<string>CheckedForUserDefaultShell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>1</string>
+					</dict>
+					<key>2</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>source</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>2</string>
+					</dict>
+					<key>3</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>COMMAND_STRING</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>3</string>
+					</dict>
+					<key>4</key>
+					<dict>
+						<key>default value</key>
+						<string>/bin/sh</string>
+						<key>name</key>
+						<string>shell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>4</string>
+					</dict>
+				</dict>
+				<key>isViewVisible</key>
+				<integer>1</integer>
+				<key>location</key>
+				<string>309.000000:253.000000</string>
+				<key>nibPath</key>
+				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/Base.lproj/main.nib</string>
+			</dict>
+			<key>isViewVisible</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>connectors</key>
+	<dict/>
+	<key>workflowMetaData</key>
+	<dict>
+		<key>serviceApplicationBundleID</key>
+		<string></string>
+		<key>serviceApplicationPath</key>
+		<string></string>
+		<key>serviceInputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>serviceOutputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>serviceProcessesInput</key>
+		<integer>0</integer>
+		<key>workflowTypeIdentifier</key>
+		<string>com.apple.Automator.servicesMenu</string>
+	</dict>
+</dict>
+</plist>
