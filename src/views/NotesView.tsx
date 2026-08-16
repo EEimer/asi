@@ -4,6 +4,7 @@ import type { Note } from '../../shared/types'
 import { Plus, Pencil, Trash2, Loader2, StickyNote, CheckCircle2 } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
 import { ConfirmModal } from '../components/ConfirmModal'
+import { Button } from '../components/ui/Button'
 
 export default function NotesView() {
   const [notes, setNotes] = useState<Note[]>([])
@@ -74,47 +75,45 @@ export default function NotesView() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-slate-900">Notizen</h2>
-        <button onClick={openNew} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-          <Plus className="w-3.5 h-3.5" /> Neue Notiz
-        </button>
+        <h2 className="text-lg font-semibold text-content">Notizen</h2>
+        <Button size="sm" onClick={openNew}><Plus className="w-3.5 h-3.5" /> Neue Notiz</Button>
       </div>
 
       {notes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+        <div className="flex flex-col items-center justify-center py-20 text-dim">
           <StickyNote className="w-10 h-10 mb-3" />
           <p className="text-sm">Noch keine Notizen</p>
         </div>
       ) : (
         <div className="grid gap-3">
           {notes.map(n => (
-            <div key={n.id} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 transition-colors">
+            <div key={n.id} className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-4 card-interactive">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(n)}>
-                  <h3 className="font-semibold text-slate-900 text-sm">
+                  <h3 className="font-semibold text-content text-sm">
                     {n.title || 'Ohne Titel'}
-                    <span className="font-normal text-slate-400"> — {new Date(n.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                    {n.updatedAt !== n.createdAt && <span className="font-normal text-[10px] text-slate-400 ml-1 italic">(bearbeitet)</span>}
+                    <span className="font-normal text-dim"> — {new Date(n.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    {n.updatedAt !== n.createdAt && <span className="font-normal text-[10px] text-dim ml-1 italic">(bearbeitet)</span>}
                     {!!n.isTodo ? (
-                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full">TODO</span>
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-warning bg-warning/10 border border-warning/30 rounded-full">TODO</span>
                     ) : (
-                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-full">INFO</span>
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-sky bg-sky/10 border border-sky/30 rounded-full">INFO</span>
                     )}
                   </h3>
-                  {n.text && <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap break-words">{n.text}</p>}
+                  {n.text && <p className="text-xs text-muted mt-1 whitespace-pre-wrap break-words">{n.text}</p>}
                 </div>
                 <div className="flex gap-1 shrink-0">
                   {!!n.isTodo && (
-                    <button onClick={() => handleDone(n.id)} className="p-2 text-slate-400 hover:text-success hover:bg-emerald-50 rounded-lg transition-colors" title="Done">
+                    <Button size="xs" variant="ghost" iconOnly onClick={() => handleDone(n.id)} title="Done" className="text-dim hoverable:text-success">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                    </button>
+                    </Button>
                   )}
-                  <button onClick={() => openEdit(n)} className="p-2 text-slate-400 hover:text-primary hover:bg-slate-50 rounded-lg transition-colors" title="Bearbeiten">
+                  <Button size="xs" variant="ghost" iconOnly onClick={() => openEdit(n)} title="Bearbeiten" className="text-dim hoverable:text-primary">
                     <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => setDeleteTarget(n.id)} className="p-2 text-slate-400 hover:text-danger hover:bg-red-50 rounded-lg transition-colors" title="Löschen">
+                  </Button>
+                  <Button size="xs" variant="ghost" iconOnly onClick={() => setDeleteTarget(n.id)} title="Löschen" className="text-dim hoverable:text-danger">
                     <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -130,7 +129,7 @@ export default function NotesView() {
             value={title}
             onChange={e => setTitle(e.target.value)}
             autoFocus
-            className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40"
+            className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) e.preventDefault() }}
           />
           <textarea
@@ -138,26 +137,23 @@ export default function NotesView() {
             value={text}
             onChange={e => setText(e.target.value)}
             rows={6}
-            className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40 resize-y"
+            className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
           />
-          <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+          <label className="inline-flex items-center gap-2 text-sm text-muted">
             <input
               type="checkbox"
               checked={isTodo}
               onChange={e => setIsTodo(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30"
+              className="w-4 h-4 rounded border-surfaceBorder text-primary focus:ring-primary/30"
             />
             TODO
           </label>
         </div>
         <ModalFooter>
-          <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
-            Abbrechen
-          </button>
-          <button onClick={handleSave} disabled={saving || (!title.trim() && !text.trim())} className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          <Button variant="cancel" outline onClick={() => setModalOpen(false)}>Abbrechen</Button>
+          <Button onClick={handleSave} disabled={saving || (!title.trim() && !text.trim())} loading={saving}>
             {editNote ? 'Speichern' : 'Erstellen'}
-          </button>
+          </Button>
         </ModalFooter>
       </Modal>
 

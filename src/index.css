@@ -2,27 +2,209 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Farbsystem 1:1 aus ../wealth übernommen (client/index.css). Die Kommentare dort
+   begründen jeden einzelnen Helligkeitswert – sie stehen hier mit, damit beim
+   Nachjustieren klar ist, warum ein Wert so und nicht anders gewählt wurde. */
+
 :root {
-  --primary: 29 78 216;
-  --danger: 198 84 84;
-  --success: 16 185 129;
-  --accent: 139 92 246;
-  --warning: 245 158 11;
-  --text: 17 24 39;
-  --panel: 250 252 255;
-  --border: 210 220 232;
+  color-scheme: light;
+  /* Ein Eckenradius für die ganze App – Karten, Buttons, Inputs, Badges, Tracks.
+     rounded-sm/-md/-lg/-xl hängen alle an diesem Wert (tailwind.config.js), damit
+     ein Wert die gesamte Kantenwirkung dreht. */
+  --radius: 6px;
+  --radius-inner: calc(var(--radius) - 2px);
+  /* Mischfarbe für die abgeleiteten -hover-Utilities (tailwind.config.js): im Light
+     abdunkeln, im Dark aufhellen. Eine Definition, beide Themes korrekt. */
+  --hover-mix: #000;
+
+  /* Light ist keine Umkehrung von Dark: geteilt sind nur die Farbtöne und die Rollen,
+     jeder Helligkeitswert ist eigens bestimmt.
+
+     Nur EIN Trennmittel dominiert. Im Dark arbeiten getoente Flaeche, Rahmen und
+     Schatten zusammen, weil dort jedes einzelne schwach ist. Im Hellen ist dunkel auf
+     hell ohnehin gut sichtbar – dieselbe Kombination laesst die Karten wie aufgeklebte
+     Zettel wirken. Die Kante traegt hier der Rahmen allein: Seite nur 1,06:1 unter der
+     Karte, Schatten auf eine Haarlinie reduziert, kein Schlagschatten. */
+  --border: 232 233 235; /* #E8E9EB */
+  --border-soft: 242 242 243; /* #F2F2F3 – Zeilentrenner in Tabellen */
+  --panel: 255 255 255; /* surface-1 – Karten */
+  --input-bg: 240 242 247; /* #F0F2F7 surface-2 – Control-Tracks */
+  --row-hover: 240 242 247; /* = surface-2 */
+  --bg: 247 248 251; /* #F7F8FB – 1,06:1 zur Karte */
+  --text: 17 24 39; /* #111827 – 17,7:1 */
+  /* Dunkle Schrift auf Weiss wirkt schlanker als helle auf Dunkel – helle Flaechen
+     strahlen optisch in die Buchstabenformen hinein. Beide Sekundaertoene stehen
+     deshalb eine Stufe dunkler als ihr Dark-Gegenwert. */
+  --text-muted: 71 82 107; /* #47526B – 7,8:1 */
+  --text-dim: 107 118 144; /* #6B7690 – 4,6:1 */
+  --text-faint: 169 178 194; /* #A9B2C2 – nur der Platzhalterstrich */
+  /* Elevation dreht sich um: im Hellen keine Lichtkante oben. Und nur eine Haarlinie
+     Schatten – der weiche Schlagschatten liess die Karten aufgeklebt wirken. */
+  --card-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  --placeholder: 124 135 158; /* = --text-dim */
+  --primary: 68 83 196; /* #4453C4 – weisser Text darauf 6,4:1 */
+  --accent-text: 60 74 184; /* #3C4AB8 – Akzent als Text */
+  --secondary: 51 65 85; /* rgb(51 65 85) */
+  --accent: 85 17 148; /* #551194 */
+  --tertiary: 48 170 223;
+  --success: 0 136 75; /* #00884B – 4,5:1 */
+  --danger: 201 56 56; /* #C93838 – 5,1:1 */
+  --warning: 183 95 11; /* #B75F0B */
+  --pink: 219 39 119; /* #DB2777 pink-600 */
+  --sky: 0 166 244; /* #00a6f4 */
+  /* Nur im Dark genutzt (immer hinter dark:-Varianten) – Light-Werte inert, müssen aber existieren */
+  --bg-sidebar: 255 255 255; /* = --panel light */
+  --sidebar-sep: 232 233 235; /* = --border light */
 }
 
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+/* Dark Theme – gestaffelte, minimal kühl getönte Ebenen.
+   Seite (bg) < Header/Sidebar < Karten (panel) < Tracks/Hover (input-bg).
+   Die Schritte sind bewusst deutlich: lagen Seite und Karte nur ~4% auseinander,
+   verschwanden die Karten auf schwächeren Displays. */
+.dark {
+  color-scheme: dark;
+  --hover-mix: #fff;
+  /* Die Flaechen liegen bewusst hoeher als in einem „moeglichst dunklen" Dark-Theme:
+     zwischen Seite und Karte muessen ~0,7 Helligkeitspunkte liegen (Verhaeltnis 1,13:1),
+     sonst ist der Unterschied auf den meisten Displays nicht wahrnehmbar und die Karten
+     verschwinden im Hintergrund. Die Kontur allein reicht dafuer nicht. */
+  --border: 47 49 58; /* #2F313A = rgba(255,255,255,.09) auf --panel – sichtbare Kontur */
+  --border-soft: 37 40 49; /* #252831 = rgba(255,255,255,.05) – Zeilentrenner in Tabellen */
+  --panel: 26 29 38; /* #1A1D26 surface-1 – Karten, Tabellencontainer */
+  --input-bg: 35 39 51; /* #232733 surface-2 – Control-Tracks */
+  --row-hover: 35 39 51; /* = surface-2: im Dark hellt der Hover auf */
+  --bg: 14 16 21; /* #0E1015 Seite */
+  --bg-sidebar: 20 22 29; /* #14161D – zwischen Seite und Karte */
+  --sidebar-sep: 32 34 40; /* #202228 */
+  --text: 240 242 247; /* #F0F2F7 – Primaertext, 15,0:1 */
+  --text-muted: 162 169 188; /* #A2A9BC – Labels, inaktive Tabs, 7,2:1 */
+  --text-dim: 115 123 144; /* #737B90 – Micro-Labels, Platzhalter, 4,0:1 */
+  --text-faint: 69 75 92; /* #454B5C – nur der Platzhalterstrich */
+  --primary: 91 111 224; /* #5B6FE0 Indigo */
+  --accent-text: 163 176 245; /* #A3B0F5 – Akzent als Text; #5B6FE0 traegt auf --accent-soft nicht */
+  --secondary: 162 169 188; /* = --text-muted */
+  --accent: 167 139 250; /* #A78BFA violet-400 */
+  --tertiary: 96 190 235; /* heller als Light, damit es auf dunklem Grund trägt */
+  --danger: 240 138 138; /* #F08A8A */
+  --success: 78 217 164; /* #4ED9A4 – nur als Text/Kontur, nie als grosse Flaeche */
+  --warning: 227 154 92; /* #E39A5C */
+  --pink: 236 72 153; /* #EC4899 pink-400 */
+  --sky: 0 166 244; /* #00a6f4 */
+  --placeholder: 115 123 144; /* = --text-dim */
+  /* Etwas Tiefe statt einer einzigen Ebene: kein harter Schatten, aber genug,
+     dass Karten hörbar über der Seite liegen. Der dritte Wert ist die Lichtkante
+     an der Oberkante – zusammen der grösste Einzelgewinn für „wertig". */
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 32px -12px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
 
-.prose { color: #334155; line-height: 1.7; }
-.prose h1, .prose h2, .prose h3, .prose h4 { color: #0f172a; font-weight: 600; margin-top: 0.75em; margin-bottom: 0.5em; }
+/* Karten-Elevation. Als eigene Regel statt als Tailwind-Utility: einen Arbitrary-Wert,
+   der mit var() beginnt, liest Tailwind als Schattenfarbe und nicht als Schatten – das
+   Ergebnis waere ungueltiges CSS und damit gar kein Schatten. */
+.card-elevation {
+  box-shadow: var(--card-shadow);
+}
+
+/* Ein Hover-Vokabular für alle klickbaren Flächen. Vorher standen hier sechs Idiome
+   nebeneinander (nur Rand, nur Fläche, content/[0.04], primary/10, accent/10, rowHover)
+   – eine Karte, die allein den Rand färbt, liest sich neben einer Zeile mit
+   Flächenwechsel wie "kein Effekt". Beide Stufen bewegen sich um genau eine
+   Flächenebene: surface-1 (--panel) -> surface-2 (--row-hover), derselbe Schritt,
+   den das Theme ohnehin für Tracks und Tabellenzeilen benutzt.
+
+   Als CSS-Regel statt als Tailwind-Utility, weil :hover hier den bg-panel-Utility
+   der Karte überschreiben muss – .card-interactive:hover (0,2,0) schlägt .bg-panel
+   (0,1,0) unabhängig von der Reihenfolge im Stylesheet.
+
+   Kein cursor: pointer: bei Karten, die nur ein Klickziel ENTHALTEN (Summaries,
+   Notes), zeigt sonst auch der Aktionsbereich daneben die Hand. Wo die ganze Karte
+   klickt, setzt die Call-Site cursor-pointer dazu. */
+.card-interactive {
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.card-interactive:hover {
+  background-color: rgb(var(--row-hover));
+  border-color: rgb(var(--primary) / 0.4);
+}
+
+/* Zeilen in Listen und Tabellen: nur die Fläche, und die halbe Deckkraft. Eine Zeile
+   steht direkt neben ihren Nachbarn – auf voller Stärke wandert das Auge bei jeder
+   Mausbewegung mit. */
+.row-interactive {
+  transition: background-color 150ms ease;
+}
+.row-interactive:hover {
+  background-color: rgb(var(--row-hover) / 0.5);
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: rgb(var(--text));
+  background-color: rgb(var(--bg));
+}
+
+html, body, #root { min-height: 100%; }
+
+/* Der Verlauf ist eine Light-Dekoration. Eng gefuehrt: ausserhalb von #F7F8FB .. #FBFCFD
+   haetten weisse Karten je nach Position unterschiedlich viel Kontrast und die Kante
+   verschwaende am hellen Ende. Im Dark entsteht er gar nicht erst. */
+html:not(.dark) body {
+  background: linear-gradient(140deg, rgb(var(--bg)) 0%, #FBFCFD 100%);
+}
+
+html.dark,
+html.dark #root {
+  background-color: rgb(var(--bg));
+}
+
+/* Kopfleiste als eigene Tiefen-Ebene zwischen Seite und Karten. */
+html.dark .app-header {
+  background-color: rgb(var(--bg-sidebar));
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgb(var(--placeholder));
+}
+
+/* Checkbox/Radio: Primary statt Browser-Standard (Babyblau) */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: rgb(var(--primary));
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  border: 3px solid rgba(0, 0, 0, 0);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.6); }
+
+.dark * { scrollbar-color: rgba(75, 85, 99, 0.5) transparent; }
+.dark *::-webkit-scrollbar-thumb { background-color: rgba(75, 85, 99, 0.5); }
+.dark *::-webkit-scrollbar-thumb:hover { background-color: rgba(75, 85, 99, 0.7); }
+
+/* Markdown der Zusammenfassungen. Durchgaengig ueber Tokens, damit derselbe Block in
+   beiden Themes traegt. Im Dark ist der Fliesstext leicht abgedimmt (bleibt ~10:1) und
+   eine Gewichtsstufe kraeftiger – der dunkle Grund schnuert helle Striche optisch ein.
+   Ueberschriften und Fettes bleiben voll hell und stechen so als Anker heraus. */
+.prose { color: rgb(var(--text-muted)); line-height: 1.7; }
+.prose h1, .prose h2, .prose h3, .prose h4 { color: rgb(var(--text)); font-weight: 600; margin-top: 0.75em; margin-bottom: 0.5em; }
 .prose > :first-child { margin-top: 0; }
 .prose h1 { font-size: 1.25rem; }
 .prose h2 { font-size: 1.125rem; }
 .prose h3 { font-size: 1rem; }
 .prose p { margin-bottom: 0.75em; }
-.prose strong { color: #0f172a; font-weight: 600; }
+.prose strong { color: rgb(var(--text)); font-weight: 600; }
 .prose ul, .prose ol { padding-left: 1.5em; margin-bottom: 0.75em; }
 .prose ul { list-style-type: disc; }
 .prose ol { list-style-type: decimal; }
@@ -30,16 +212,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .prose li > ul, .prose li > ol { margin-top: 0.25em; margin-bottom: 0; }
 .prose a { color: rgb(var(--primary)); text-decoration: underline; }
 .prose a:hover { opacity: 0.8; }
-.prose blockquote { border-left: 3px solid #cbd5e1; padding-left: 1em; color: #64748b; font-style: italic; margin: 1em 0; }
-.prose code { background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 0.25rem; font-size: 0.85em; }
-.prose pre { background: #f1f5f9; padding: 1em; border-radius: 0.5rem; overflow-x: auto; margin: 1em 0; }
+.prose blockquote { border-left: 3px solid rgb(var(--border)); padding-left: 1em; color: rgb(var(--text-dim)); font-style: italic; margin: 1em 0; }
+.prose code { background: rgb(var(--input-bg)); padding: 0.15em 0.4em; border-radius: var(--radius); font-size: 0.85em; }
+.prose pre { background: rgb(var(--input-bg)); padding: 1em; border-radius: var(--radius); overflow-x: auto; margin: 1em 0; }
 .prose pre code { background: none; padding: 0; }
 .prose table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.875rem; }
-.prose th, .prose td { border: 1px solid #e2e8f0; padding: 0.5em 0.75em; text-align: left; }
-.prose th { background: #f8fafc; font-weight: 600; color: #0f172a; }
-.prose tr:nth-child(even) { background: #f8fafc; }
-.prose hr { border: none; border-top: 1px solid #e2e8f0; margin: 0.75em 0; }
-.prose img { max-width: 100%; border-radius: 0.5rem; }
+.prose th, .prose td { border: 1px solid rgb(var(--border)); padding: 0.5em 0.75em; text-align: left; }
+.prose th { background: rgb(var(--input-bg)); font-weight: 600; color: rgb(var(--text)); }
+.prose tr:nth-child(even) { background: rgb(var(--row-hover) / 0.5); }
+.prose hr { border: none; border-top: 1px solid rgb(var(--border)); margin: 0.75em 0; }
+.prose img { max-width: 100%; border-radius: var(--radius); }
+html.dark .prose { color: rgb(var(--text) / 0.84); font-weight: 500; }
+html.dark .prose h1, html.dark .prose h2, html.dark .prose h3,
+html.dark .prose h4, html.dark .prose strong { color: rgb(var(--text)); }
 
 @keyframes pulse-slow {
   0%, 100% { opacity: 1; }

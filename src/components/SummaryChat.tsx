@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, type ChatMessage } from '../../shared/types'
 import { ChatBubble } from './ChatBubble'
 import { ChatComposer } from './ChatComposer'
 import { ConfirmModal } from './ConfirmModal'
+import { Button } from './ui/Button'
 import { useToast } from '../store/toastStore'
 
 interface SummaryChatProps {
@@ -96,23 +97,19 @@ export function SummaryChat({ summaryId, summaryHtml, summaryModel }: SummaryCha
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-slate-900">Chat</h2>
-        <button
-          onClick={() => setResetOpen(true)}
-          disabled={sending || messages.length === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-40"
-        >
+        <h2 className="text-base font-semibold text-content">Chat</h2>
+        <Button size="sm" variant="cancel" outline onClick={() => setResetOpen(true)} disabled={sending || messages.length === 0}>
           <RotateCcw className="w-3.5 h-3.5" /> Zurücksetzen
-        </button>
+        </Button>
       </div>
 
-      <div ref={listRef} className="flex flex-col gap-3 min-h-[55vh] max-h-[65vh] overflow-y-auto bg-slate-50 rounded-xl p-4">
+      <div ref={listRef} className="flex flex-col gap-3 min-h-[55vh] max-h-[65vh] overflow-y-auto bg-inputBg rounded-sm p-4">
         <ChatBubble role="assistant" model={summaryModel}>
           <div className="prose prose-sm prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: summaryHtml }} />
         </ChatBubble>
 
         {loading && (
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2 text-xs text-dim">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verlauf wird geladen...
           </div>
         )}
@@ -131,7 +128,7 @@ export function SummaryChat({ summaryId, summaryHtml, summaryModel }: SummaryCha
               <p className="whitespace-pre-wrap">{pendingQuestion}</p>
             </ChatBubble>
             <ChatBubble role="assistant" model={model}>
-              <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+              <Loader2 className="w-4 h-4 animate-spin text-dim" />
             </ChatBubble>
           </>
         )}

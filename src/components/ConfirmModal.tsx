@@ -1,4 +1,5 @@
 import { Modal, ModalFooter } from './Modal'
+import { Button } from './ui/Button'
 
 type ConfirmModalProps = {
   open: boolean
@@ -11,23 +12,13 @@ type ConfirmModalProps = {
   variant?: 'danger' | 'warning' | 'primary'
 }
 
-const variantClasses = {
-  primary: 'bg-primary text-white hover:bg-primary/90 border-primary',
-  danger: 'bg-danger text-white hover:bg-danger/90 border-danger',
-  warning: 'bg-warning text-white hover:bg-warning/90 border-warning',
-}
-
 export function ConfirmModal({ open, title, description, confirmLabel, cancelLabel = 'Abbrechen', onConfirm, onClose, variant = 'danger' }: ConfirmModalProps) {
   return (
     <Modal open={open} onClose={onClose} title={title} escapeConfirms onConfirm={onClose}>
-      {description && <p className="text-sm text-slate-600">{description}</p>}
+      {description && <p className="text-sm text-muted">{description}</p>}
       <ModalFooter>
-        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
-          {cancelLabel}
-        </button>
-        <button type="button" onClick={onConfirm} className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${variantClasses[variant]}`}>
-          {confirmLabel}
-        </button>
+        <Button variant="cancel" outline onClick={onClose}>{cancelLabel}</Button>
+        <Button variant={variant} onClick={onConfirm}>{confirmLabel}</Button>
       </ModalFooter>
     </Modal>
   )

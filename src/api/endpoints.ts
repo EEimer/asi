@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, Settings, Note, Prediction, ChatMessage, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, SummaryDetail, Settings, Note, Prediction, ChatMessage, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
 
 export interface CustomPrompt {
   id: string
@@ -61,11 +61,12 @@ export async function createSummary(
   lang?: string,
   model?: string,
   customPrompt?: string,
+  detail?: SummaryDetail,
 ): Promise<{ id: string; status: string }> {
   const res = await fetch(`${BASE}/summaries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model, customPrompt }),
+    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model, customPrompt, detail }),
   })
   if (!res.ok) throw new Error(`Create error: ${res.status}`)
   return res.json()

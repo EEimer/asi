@@ -22,6 +22,7 @@ db.exec(`
     model         TEXT NOT NULL DEFAULT '',
     thumbnail_url TEXT NOT NULL DEFAULT '',
     lang          TEXT NOT NULL DEFAULT 'de',
+    detail        TEXT NOT NULL DEFAULT 'long',
     transcript    TEXT DEFAULT '',
     summary       TEXT DEFAULT '',
     custom_prompt TEXT DEFAULT '',
@@ -100,6 +101,8 @@ try { db.exec('ALTER TABLE predictions ADD COLUMN price_target TEXT NOT NULL DEF
 try { db.exec('ALTER TABLE notes ADD COLUMN is_todo INTEGER NOT NULL DEFAULT 1') } catch {}
 try { db.exec('ALTER TABLE notes ADD COLUMN is_done INTEGER NOT NULL DEFAULT 0') } catch {}
 try { db.exec(`ALTER TABLE summaries ADD COLUMN chat TEXT NOT NULL DEFAULT '[]'`) } catch {}
+// Bestehende Zusammenfassungen sind alle in der langen Variante entstanden.
+try { db.exec(`ALTER TABLE summaries ADD COLUMN detail TEXT NOT NULL DEFAULT 'long'`) } catch {}
 
 // Migrate old prompt to new format
 const OLD_PROMPT_PREFIX = 'Du bist ein Experte für Zusammenfassungen. Fasse das folgende YouTube-Transkript'
@@ -112,6 +115,7 @@ const existingKeys = db.query('SELECT key FROM settings').all() as { key: string
 const existing = new Set(existingKeys.map(r => r.key))
 const defaults: Record<string, string> = {
   summary_prompt: DEFAULT_SETTINGS.summaryPrompt,
+  short_summary_prompt: DEFAULT_SETTINGS.shortSummaryPrompt,
   default_lang: DEFAULT_SETTINGS.defaultLang,
   cookie_browser: DEFAULT_SETTINGS.cookieBrowser,
   openai_model: DEFAULT_SETTINGS.openaiModel,

@@ -38,21 +38,21 @@ export function Modal({ open, title, description, onClose, children, size = 'def
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6 dark:bg-black/50"
       onMouseDown={e => { if (e.target === e.currentTarget) pointerDownOnOverlayRef.current = true }}
       onClick={e => { if (e.target === e.currentTarget && pointerDownOnOverlayRef.current) handleCloseAttempt() }}
     >
       <div
-        className={cn('max-h-[90vh] w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl', size === 'large' ? 'max-w-6xl' : 'max-w-md')}
+        className={cn('max-h-[90vh] w-full overflow-y-auto rounded-xl border border-surfaceBorder bg-panel p-6 shadow-xl', size === 'large' ? 'max-w-6xl' : 'max-w-md')}
         onMouseDown={() => { pointerDownOnOverlayRef.current = false }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            {typeof title === 'string' ? <h3 className="text-lg font-semibold text-slate-900">{title}</h3> : title}
-            {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+            {typeof title === 'string' ? <h3 className="text-lg font-semibold text-content">{title}</h3> : title}
+            {description && <p className="mt-1 text-sm text-muted">{description}</p>}
           </div>
-          <button type="button" onClick={handleCloseAttempt} aria-label="Schließen" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+          <button type="button" onClick={handleCloseAttempt} aria-label="Schließen" className="flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:text-content hover:bg-rowHover transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>

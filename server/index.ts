@@ -15,7 +15,7 @@ import { loadSettings } from './config'
 import { clearAllTts, deleteTtsBySummary, ensureTtsStorage, getOrGenerateTts, getTtsIndex, resolveTtsFilePath } from './services/tts'
 import { sendAudioToTelegram } from './services/telegram'
 import { setApiConcurrency } from './services/retry'
-import { DEFAULT_SETTINGS, type ChatMessage, type ProcessingEvent, type TtsModel, type TtsVoice } from '../shared/types'
+import { DEFAULT_SETTINGS, type ChatMessage, type ProcessingEvent, type SummaryDetail, type TtsModel, type TtsVoice } from '../shared/types'
 import { existsSync } from 'node:fs'
 
 const port = Number(process.env.PORT ?? 8788)
@@ -61,7 +61,7 @@ async function processXSummary(id: string, tweetUrl: string, model: string) {
   }
 }
 
-async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string, customPrompt?: string) {
+async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string, customPrompt?: string, detail: SummaryDetail = 'long') {
   const label = knownTitle || videoUrl
   try {
     emitStep(id, label, 'metadata', 'Video-Metadaten werden geladen...')
@@ -79,12 +79,15 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
       updateSummaryLang(id, usedLang)
     }
 
-    emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${model})...`)
     const settings = loadSettings()
+    // Ein Custom Prompt sticht den Detailgrad — er bringt seine eigene Struktur mit.
+    const prompt = customPrompt ?? (detail === 'short' ? settings.shortSummaryPrompt : settings.summaryPrompt)
+    const detailLabel = detail === 'short' ? 'kurz' : 'lang'
+    emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${model}, ${detailLabel})...`)
     const summary = await summarizeTranscript(text, model, (msg) => {
       emitStep(id, title, 'summarizing', msg)
-    }, { title, channel }, customPrompt)
-    updateSummaryDone(id, text, summary, customPrompt ?? settings.summaryPrompt)
+    }, { title, channel }, prompt)
+    updateSummaryDone(id, text, summary, prompt)
 
     const { author } = extractSummaryMeta(summary)
     if (author) {
@@ -138,6 +141,7 @@ const app = new Elysia()
     return { ok: true }
   }, { body: t.Object({
     summaryPrompt: t.Optional(t.String()),
+    shortSummaryPrompt: t.Optional(t.String()),
     defaultLang: t.Optional(t.String()),
     cookieBrowser: t.Optional(t.String()),
     openaiModel: t.Optional(t.String()),
@@ -198,9 +202,10 @@ const app = new Elysia()
     const title = body.videoTitle ?? ''
     const channel = body.channelName ?? ''
     const thumbnail = body.thumbnailUrl ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
-    const id = createSummary(videoId, body.videoUrl, lang, model, title, channel, thumbnail)
+    const detail: SummaryDetail = body.detail === 'short' ? 'short' : 'long'
+    const id = createSummary(videoId, body.videoUrl, lang, model, title, channel, thumbnail, detail)
     emitStep(id, title || body.videoUrl, 'queued', 'In Warteschlange...')
-    processSummary(id, body.videoUrl, lang, model, title, channel, body.customPrompt)
+    processSummary(id, body.videoUrl, lang, model, title, channel, body.customPrompt, detail)
     return { id, status: 'processing' }
   }, { body: t.Object({
     videoUrl: t.String(),
@@ -210,6 +215,7 @@ const app = new Elysia()
     lang: t.Optional(t.String()),
     model: t.Optional(t.String()),
     customPrompt: t.Optional(t.String()),
+    detail: t.Optional(t.Union([t.Literal('short'), t.Literal('long')])),
   }) })
 
   .get('/api/videos/:videoId/summaries', ({ params }) => {
@@ -233,7 +239,7 @@ const app = new Elysia()
     const ok = resetSummaryForRetry(params.id)
     if (!ok) return new Response(JSON.stringify({ error: 'Retry failed' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
-    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '')
+    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '', undefined, summary.detail === 'short' ? 'short' : 'long')
     return { ok: true, id: summary.id, status: 'processing' }
   })
 

@@ -2,11 +2,13 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, generateTts, fetchTtsIndex, fetchCustomPrompts } from '../api/endpoints'
 import type { CustomPrompt } from '../api/endpoints'
-import type { TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
-import { MODEL_OPTIONS, DEFAULT_SETTINGS } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, LinkIcon, Play, Send, Check, Wand2 } from 'lucide-react'
+import type { SummaryDetail, TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
+import { MODEL_OPTIONS, DEFAULT_SETTINGS, SUMMARY_DETAIL_LABELS } from '../../shared/types'
+import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, LinkIcon, Play, Send, Check, Wand2, Zap } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SegmentedControl } from '../components/SegmentedControl'
+import { Button, buttonClasses } from '../components/ui/Button'
+import { Badge } from '../components/ui/Badge'
 import { useAudioPlayer } from '../store/audioPlayerStore'
 
 const PAGE_SIZE = 30
@@ -51,11 +53,14 @@ export default function BrowseView() {
   const [processing, setProcessing] = useState<Map<string, string>>(new Map())
   const [summarized, setSummarized] = useState<Map<string, string>>(new Map())
   const [failed, setFailed] = useState<Map<string, string>>(new Map())
+  /** summaryId -> Detailgrad, damit die Karte "Kurz"/"Lang" anzeigen kann. */
+  const [detailById, setDetailById] = useState<Map<string, SummaryDetail>>(new Map())
   const sentinelRef = useRef<HTMLDivElement>(null)
   const videosLenRef = useRef(0)
   videosLenRef.current = videos.length
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [manualUrl, setManualUrl] = useState('')
+  const [manualDetail, setManualDetail] = useState<SummaryDetail>('long')
   const [submitting, setSubmitting] = useState(false)
   const [customPromptModalOpen, setCustomPromptModalOpen] = useState(false)
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([])
@@ -85,12 +90,15 @@ export default function BrowseView() {
       const all = await fetchSummaries()
       const doneMap = new Map<string, string>()
       const errMap = new Map<string, string>()
+      const detailMap = new Map<string, SummaryDetail>()
       for (const s of all) {
+        detailMap.set(s.id, s.detail === 'short' ? 'short' : 'long')
         if (s.status === 'done') doneMap.set(s.videoId, s.id)
         else if (s.status === 'error') errMap.set(s.videoId, s.id)
       }
       setSummarized(doneMap)
       setFailed(errMap)
+      setDetailById(detailMap)
     } catch {}
   }
 
@@ -250,10 +258,13 @@ export default function BrowseView() {
         const summaries = await fetchSummaries()
         const doneMap = new Map<string, string>()
         const errorMap = new Map<string, string>()
+        const detailMap = new Map<string, SummaryDetail>()
         for (const s of summaries) {
+          detailMap.set(s.id, s.detail === 'short' ? 'short' : 'long')
           if (s.status === 'done') doneMap.set(s.videoId, s.id)
           if (s.status === 'error') errorMap.set(s.videoId, s.id)
         }
+        setDetailById(detailMap)
         setProcessing(prev => {
           const next = new Map(prev)
           for (const id of prev.keys()) if (doneMap.has(id) || errorMap.has(id)) next.delete(id)
@@ -294,10 +305,11 @@ export default function BrowseView() {
     return () => clearInterval(interval)
   }, [videos.length, pendingTtsByVideo, runningTtsByVideo, videos])
 
-  async function handleSummarize(video: YouTubeVideo) {
+  async function handleSummarize(video: YouTubeVideo, detail: SummaryDetail) {
     try {
-      const result = await createSummary(video.url, { title: video.title, channel: video.channel, thumbnail: video.thumbnail })
+      const result = await createSummary(video.url, { title: video.title, channel: video.channel, thumbnail: video.thumbnail }, undefined, undefined, undefined, detail)
       setProcessing(prev => new Map(prev).set(video.id, result.id))
+      setDetailById(prev => new Map(prev).set(result.id, detail))
       setFailed(prev => {
         const next = new Map(prev)
         next.delete(video.id)
@@ -331,8 +343,9 @@ export default function BrowseView() {
 
     setSubmitting(true)
     try {
-      const result = await createSummary(url)
+      const result = await createSummary(url, undefined, undefined, undefined, undefined, manualDetail)
       setProcessing(prev => new Map(prev).set(videoId, result.id))
+      setDetailById(prev => new Map(prev).set(result.id, manualDetail))
 
       // Add a placeholder video to the top of the list
       setVideos(prev => {
@@ -433,50 +446,48 @@ export default function BrowseView() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-slate-900">Deine YouTube Abos</h2>
-          {!loading && <span className="text-xs text-slate-400">{videos.length} Videos</span>}
+          <h2 className="text-lg font-semibold text-content">Deine YouTube Abos</h2>
+          {!loading && <span className="text-xs text-dim">{videos.length} Videos</span>}
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center text-xs">
-            <SegmentedControl<'filtered' | 'all'>
-              className="mini"
-              values={['filtered', 'all']}
-              labels={['Gefiltert', 'Alle']}
-              value={channelFilterMode}
-              onChange={setChannelFilterMode}
-            />
-          </div>
-          <button onClick={() => { setManualUrl(''); setLinkModalOpen(true) }} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors">
+          <SegmentedControl<'filtered' | 'all'>
+            size="sm"
+            values={['filtered', 'all']}
+            labels={['Gefiltert', 'Alle']}
+            value={channelFilterMode}
+            onChange={setChannelFilterMode}
+          />
+          <Button size="sm" onClick={() => { setManualUrl(''); setLinkModalOpen(true) }}>
             <LinkIcon className="w-3.5 h-3.5" /> YouTube Link
-          </button>
-          <button onClick={openCustomPromptModal} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 text-slate-600 bg-white rounded-lg hover:bg-slate-50 transition-colors">
+          </Button>
+          <Button size="sm" variant="cancel" outline onClick={openCustomPromptModal}>
             <Wand2 className="w-3.5 h-3.5" /> Custom Prompt
-          </button>
-          <button onClick={handleRefresh} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-40" title="Feed aktualisieren">
+          </Button>
+          <Button size="sm" variant="cancel" outline iconOnly onClick={handleRefresh} disabled={loading} title="Feed aktualisieren">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+          </Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-500">
+        <div className="flex flex-col items-center justify-center py-16 text-muted">
           <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
           <p className="text-sm">YouTube Abo-Feed wird geladen...</p>
-          <p className="text-xs text-slate-400 mt-1">Das kann beim ersten Mal etwas dauern</p>
+          <p className="text-xs text-dim mt-1">Das kann beim ersten Mal etwas dauern</p>
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center py-16">
           <AlertCircle className="w-10 h-10 text-danger mb-3" />
-          <p className="text-sm text-slate-700 font-medium mb-1">Feed konnte nicht geladen werden</p>
-          <p className="text-xs text-slate-500 mb-2 max-w-md text-center">{error}</p>
-          <p className="text-xs text-slate-400 mb-4 max-w-md text-center">Prüfe in den Einstellungen den Cookie-Browser oder verwende einen direkten YouTube-Link.</p>
-          <button onClick={() => loadFeed(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+          <p className="text-sm text-content font-medium mb-1">Feed konnte nicht geladen werden</p>
+          <p className="text-xs text-muted mb-2 max-w-md text-center">{error}</p>
+          <p className="text-xs text-dim mb-4 max-w-md text-center">Prüfe in den Einstellungen den Cookie-Browser oder verwende einen direkten YouTube-Link.</p>
+          <Button onClick={() => loadFeed(true)}>
             <RefreshCw className="w-3.5 h-3.5" /> Erneut versuchen
-          </button>
+          </Button>
         </div>
       ) : (
         <>
-          <div className="grid gap-3">
+          <div className="grid gap-4">
             {videos.map(v => {
               const isProcessing = processing.has(v.id)
               const doneId = summarized.get(v.id)
@@ -484,6 +495,8 @@ export default function BrowseView() {
               const failedId = failed.get(v.id)
               const summaryId = doneId ?? processingId ?? failedId
               const isFailed = !doneId && !processingId && !!failedId
+              const doneDetail = doneId ? detailById.get(doneId) : undefined
+              const processingDetail = processingId ? detailById.get(processingId) : undefined
               const hasTts = !!(doneId && ttsIndex[doneId] && Object.keys(ttsIndex[doneId].variants).length > 0)
               const cardClickable = !!summaryId
               const isBlocked = channelKeysOf(v).some(k => blockedKeys.has(k))
@@ -491,94 +504,110 @@ export default function BrowseView() {
                 <div
                   key={v.id}
                   onClick={cardClickable && summaryId ? () => navigate(`/summaries/${summaryId}`) : undefined}
-                  className={`bg-white border border-slate-200 rounded-xl overflow-hidden transition-colors ${cardClickable ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : 'hover:border-slate-300'}`}
+                  className={`card-elevation bg-panel border border-surfaceBorder rounded-xl overflow-hidden card-interactive ${cardClickable ? 'cursor-pointer' : ''}`}
                 >
                   <div className="flex gap-4 p-4">
                     <div className="relative shrink-0">
-                      <img src={v.thumbnail} alt="" className="w-44 h-[100px] object-cover rounded-lg bg-slate-100" />
+                      <img src={v.thumbnail} alt="" className="w-44 h-[100px] object-cover rounded-lg bg-inputBg" />
                       {v.durationFormatted && <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded">{v.durationFormatted}</span>}
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col justify-between">
-                      <h3 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2">{v.title}</h3>
+                      <h3 className="font-semibold text-content text-sm leading-snug line-clamp-2">{v.title}</h3>
                       <div>
-                        <p className="text-xs text-slate-700 flex items-center gap-1.5">
+                        <p className="text-xs text-content flex items-center gap-1.5">
                           {v.channel}
                           {v.channel && (
                             isBlocked ? (
-                              <button
+                              <Button
+                                size="inline"
+                                variant="danger"
+                                outline
                                 onClick={e => { e.stopPropagation(); handleUnblock(v) }}
                                 title={`${v.channel} wieder einblenden`}
-                                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium text-danger bg-danger/10 border border-danger/30 rounded-md hover:bg-danger/20 transition-colors"
                               >
                                 <EyeOff className="w-3 h-3" /> Ausgeblendet
-                              </button>
+                              </Button>
                             ) : (
-                              <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-slate-300 hover:text-danger transition-colors"><Eye className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); handleBlock(v.channel) }} title={`${v.channel} ignorieren`} className="text-faint hover:text-danger transition-colors"><Eye className="w-3 h-3" /></button>
                             )
                           )}
                         </p>
-                        {v.publishedAt && <p className="text-[10px] text-slate-600 mt-0.5">{timeAgo(v.publishedAt)} · {v.uploadDate}</p>}
+                        {v.publishedAt && <p className="text-[10px] text-muted mt-0.5">{timeAgo(v.publishedAt)} · {v.uploadDate}</p>}
                       </div>
                     </div>
-                    <div className="shrink-0 flex flex-col gap-1.5 items-stretch" onClick={e => e.stopPropagation()}>
+                    {/* Feste Spaltenbreite: sonst richtet sich die Breite nach dem
+                        längsten Label und die Buttons springen von Karte zu Karte. */}
+                    <div className="shrink-0 w-56 flex flex-col gap-2 items-stretch" onClick={e => e.stopPropagation()}>
+                      {/* Eine Hierarchie pro Spalte: „Lang" ist die Hauptaktion und
+                          trägt als einzige eine gefüllte Fläche, „Kurz" dieselbe Farbe
+                          eine Stufe leiser. Sekundäres bleibt neutral, Zustände tragen
+                          ihre Semantikfarbe – gleiche Bauform, andere Farbe. */}
                       {summaryId && !isProcessing ? (
                         isFailed ? (
                           <>
-                            <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-danger bg-danger/10 border border-danger/30 rounded-lg hover:bg-danger/20 transition-colors">
+                            <Link to={`/summaries/${summaryId}`} className={buttonClasses({ variant: 'danger', outline: true, size: 'sm', block: true })}>
                               Fehlgeschlagen <ExternalLink className="w-3.5 h-3.5" />
                             </Link>
-                            <button onClick={() => failedId && handleRetry(v.id, failedId)} className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                            <Button size="sm" variant="primary" block onClick={() => failedId && handleRetry(v.id, failedId)}>
                               <Sparkles className="w-3.5 h-3.5" /> Retry
-                            </button>
+                            </Button>
                           </>
                         ) : (
-                          <Link to={`/summaries/${summaryId}`} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/30 rounded-lg hover:bg-success/20 transition-colors">
-                            Zusammengefasst <ExternalLink className="w-3.5 h-3.5" />
+                          <Link to={`/summaries/${summaryId}`} className={buttonClasses({ variant: 'success', outline: true, size: 'sm', block: true })}>
+                            Zusammengefasst
+                            {doneDetail && <span className="text-[10px] opacity-70">· {SUMMARY_DETAIL_LABELS[doneDetail]}</span>}
+                            <ExternalLink className="w-3.5 h-3.5" />
                           </Link>
                         )
                       ) : isProcessing ? (
-                        <span className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 border border-primary/30 rounded-lg animate-pulse-slow">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verarbeite...
-                        </span>
+                        <Badge variant="primary" className="h-8 justify-center animate-pulse-slow">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Verarbeite{processingDetail ? ` (${SUMMARY_DETAIL_LABELS[processingDetail].toLowerCase()})` : ''}...
+                        </Badge>
                       ) : (
-                        <button onClick={() => handleSummarize(v)} className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-                          <Sparkles className="w-3.5 h-3.5" /> Zusammenfassen
-                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button size="sm" variant="primary" outline onClick={() => handleSummarize(v, 'short')} title="Kurzfassung — nur die 2-3 Kernaussagen">
+                            <Zap className="w-3.5 h-3.5" /> Kurz
+                          </Button>
+                          <Button size="sm" variant="primary" onClick={() => handleSummarize(v, 'long')} title="Ausführliche Zusammenfassung mit allen Details">
+                            <Sparkles className="w-3.5 h-3.5" /> Lang
+                          </Button>
+                        </div>
                       )}
 
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant={hasTts ? 'success' : 'cancel'}
+                          outline
                           onClick={() => { void queueTtsFlow(v, 'play') }}
                           disabled={!!runningTtsByVideo[v.id]}
-                          className={`flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium border rounded-lg transition-colors disabled:opacity-50 ${
-                            hasTts
-                              ? 'text-success bg-success/10 border-success/30 hover:bg-success/20'
-                              : 'text-slate-700 bg-slate-50 border-slate-200 hover:bg-slate-100'
-                          }`}
                           title="Summary + TTS erstellen und abspielen"
                         >
                           {pendingTtsByVideo[v.id] === 'play' || runningTtsByVideo[v.id]
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             : hasTts ? <Check className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                           TTS
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="cancel"
+                          outline
                           onClick={() => { void queueTtsFlow(v, 'telegram') }}
                           disabled={!!runningTtsByVideo[v.id]}
-                          className="flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium border rounded-lg transition-colors disabled:opacity-50 text-slate-700 bg-slate-50 border-slate-200 hover:bg-slate-100"
                           title="Summary + TTS erstellen und an Telegram senden"
                         >
                           {pendingTtsByVideo[v.id] === 'telegram' || runningTtsByVideo[v.id]
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             : <Send className="w-3.5 h-3.5" />}
                           TTS
-                        </button>
+                        </Button>
                       </div>
 
-                      <a href={v.url} target="_blank" rel="noopener" className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-accent bg-accent/10 border border-accent/30 rounded-lg hover:bg-accent/20 transition-colors">
+                      <a href={v.url} target="_blank" rel="noopener" className={buttonClasses({ variant: 'accent', outline: true, size: 'sm', block: true })}>
                         <ExternalLink className="w-3.5 h-3.5" /> In YT öffnen
                       </a>
-                      {ttsErrors[v.id] ? <span className="max-w-44 text-[10px] text-danger text-right">{ttsErrors[v.id]}</span> : null}
+                      {ttsErrors[v.id] ? <span className="text-[10px] text-danger text-right">{ttsErrors[v.id]}</span> : null}
                     </div>
                   </div>
                 </div>
@@ -589,11 +618,11 @@ export default function BrowseView() {
           {loadingMore && (
             <div className="flex items-center justify-center py-6">
               <Loader2 className="w-5 h-5 animate-spin text-primary mr-2" />
-              <span className="text-sm text-slate-500">Mehr Videos laden...</span>
+              <span className="text-sm text-muted">Mehr Videos laden...</span>
             </div>
           )}
           {!hasMore && videos.length > 0 && (
-            <p className="text-center text-xs text-slate-400 py-4">Alle {videos.length} Videos geladen</p>
+            <p className="text-center text-xs text-dim py-4">Alle {videos.length} Videos geladen</p>
           )}
         </>
       )}
@@ -601,7 +630,7 @@ export default function BrowseView() {
       <Modal open={customPromptModalOpen} onClose={() => setCustomPromptModalOpen(false)} title="Mit Custom Prompt zusammenfassen">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">YouTube URL</label>
+            <label className="block text-xs font-medium text-muted mb-1.5">YouTube URL</label>
             <input
               type="text"
               placeholder="https://www.youtube.com/watch?v=..."
@@ -615,27 +644,29 @@ export default function BrowseView() {
                   setCustomPromptUrl(text)
                 }
               }}
-              className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+              className="w-full px-3 py-2.5 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-accent/40"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Prompt auswählen</label>
+            <label className="block text-xs font-medium text-muted mb-1.5">Prompt auswählen</label>
             {customPromptsLoading ? (
-              <div className="flex items-center gap-2 py-4 text-slate-400 text-sm">
+              <div className="flex items-center gap-2 py-4 text-dim text-sm">
                 <Loader2 className="w-4 h-4 animate-spin" /> Prompts laden...
               </div>
             ) : customPrompts.length === 0 ? (
-              <p className="text-sm text-slate-400 italic py-2">Keine Custom Prompts vorhanden. Zuerst in den Einstellungen anlegen.</p>
+              <p className="text-sm text-dim italic py-2">Keine Custom Prompts vorhanden. Zuerst in den Einstellungen anlegen.</p>
             ) : (
               <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {/* Auswahllisten sind keine Buttons: eine Zeile, aktiv = Primary-Tönung. */}
                 {customPrompts.map(p => (
                   <button
                     key={p.id}
+                    type="button"
                     onClick={() => setSelectedPromptId(p.id)}
-                    className={`w-full text-left px-3 py-2 text-sm rounded-lg border transition-colors ${
+                    className={`w-full text-left px-3 py-2 text-sm rounded-sm border transition-colors ${
                       selectedPromptId === p.id
-                        ? 'bg-violet-50 border-violet-300 text-violet-800 font-medium'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-100'
+                        ? 'bg-primary/15 border-primary/40 text-primary font-medium'
+                        : 'bg-inputBg border-surfaceBorder text-content hover:bg-rowHover'
                     }`}
                   >
                     {p.title}
@@ -645,16 +676,17 @@ export default function BrowseView() {
             )}
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Modell</label>
+            <label className="block text-xs font-medium text-muted mb-1.5">Modell</label>
             <div className="flex flex-wrap gap-1.5">
               {MODEL_OPTIONS.map(o => (
                 <button
                   key={o.value}
+                  type="button"
                   onClick={() => setSelectedModel(o.value)}
-                  className={`w-28 px-2 py-1.5 text-xs rounded-lg border transition-colors truncate ${
+                  className={`w-28 px-2 py-1.5 text-xs rounded-sm border transition-colors truncate ${
                     selectedModel === o.value
-                      ? 'bg-slate-800 border-slate-800 text-white font-medium'
-                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-100'
+                      ? 'bg-primary/15 border-primary/40 text-primary font-medium'
+                      : 'bg-inputBg border-surfaceBorder text-muted hover:bg-rowHover'
                   }`}
                 >
                   {o.label}
@@ -664,22 +696,19 @@ export default function BrowseView() {
           </div>
         </div>
         <ModalFooter>
-          <button onClick={() => setCustomPromptModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
-            Abbrechen
-          </button>
-          <button
+          <Button variant="cancel" outline onClick={() => setCustomPromptModalOpen(false)}>Abbrechen</Button>
+          <Button
             onClick={handleCustomPromptSubmit}
             disabled={customPromptSubmitting || !customPromptUrl.trim() || !selectedPromptId}
-            className="px-4 py-2 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            loading={customPromptSubmitting}
           >
-            {customPromptSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-            Zusammenfassen
-          </button>
+            <Wand2 className="w-4 h-4" /> Zusammenfassen
+          </Button>
         </ModalFooter>
       </Modal>
 
       <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
-        <p className="text-sm text-slate-500 mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
+        <p className="text-sm text-muted mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
         <input
           type="text"
           placeholder="https://www.youtube.com/watch?v=..."
@@ -694,16 +723,23 @@ export default function BrowseView() {
               setManualUrl(text)
             }
           }}
-          className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/40"
+          className="w-full px-3 py-2.5 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-accent/40"
         />
+        <div className="flex items-center justify-between gap-3 mt-3">
+          <span className="text-xs text-muted">{manualDetail === 'short' ? 'Nur die 2-3 Kernaussagen' : 'Ausführlich mit allen Details'}</span>
+          <SegmentedControl<SummaryDetail>
+            size="sm"
+            values={['short', 'long']}
+            labels={[SUMMARY_DETAIL_LABELS.short, SUMMARY_DETAIL_LABELS.long]}
+            value={manualDetail}
+            onChange={setManualDetail}
+          />
+        </div>
         <ModalFooter>
-          <button onClick={() => setLinkModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
-            Abbrechen
-          </button>
-          <button onClick={handleManualUrl} disabled={submitting || !manualUrl.trim()} className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50 flex items-center gap-1.5">
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Zusammenfassen
-          </button>
+          <Button variant="cancel" outline onClick={() => setLinkModalOpen(false)}>Abbrechen</Button>
+          <Button onClick={handleManualUrl} disabled={submitting || !manualUrl.trim()} loading={submitting}>
+            <Sparkles className="w-4 h-4" /> Zusammenfassen
+          </Button>
         </ModalFooter>
       </Modal>
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Loader2, Send } from 'lucide-react'
 import { MODEL_OPTIONS, MODEL_TIER_LABELS, LEGACY_MODEL_LABELS, type ModelTier } from '../../shared/types'
+import { Button } from './ui/Button'
 
 const MODEL_TIERS: ModelTier[] = ['gut', 'mittel', 'beste']
 
@@ -36,7 +37,7 @@ export function ChatComposer({ model, onModelChange, value, onChange, onSend, di
         value={model}
         onChange={e => onModelChange(e.target.value)}
         disabled={disabled}
-        className="shrink-0 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+        className="shrink-0 h-10 px-3 text-sm bg-inputBg border border-surfaceBorder rounded-sm text-content focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50"
       >
         {MODEL_TIERS.map(tier => (
           <optgroup key={tier} label={MODEL_TIER_LABELS[tier]}>
@@ -66,18 +67,12 @@ export function ChatComposer({ model, onModelChange, value, onChange, onSend, di
           }
         }}
         placeholder="Frage zum Video stellen... (Enter senden, Shift+Enter neue Zeile)"
-        className="flex-1 resize-none px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/30"
+        className="flex-1 resize-none px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-sm text-content placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary/40"
       />
 
-      <button
-        type="button"
-        onClick={onSend}
-        disabled={disabled || !value.trim()}
-        className="shrink-0 flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-      >
-        {disabled ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        Senden
-      </button>
+      <Button className="shrink-0" onClick={onSend} disabled={disabled || !value.trim()} loading={disabled}>
+        <Send className="w-4 h-4" /> Senden
+      </Button>
     </div>
   )
 }

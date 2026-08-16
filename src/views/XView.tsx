@@ -2,11 +2,13 @@ import { useEffect, useState, useRef } from 'react'
 import { createXSummaryApi, deleteXSummaryApi, fetchXSummaries, retryXSummary, translateXSummary } from '../api/endpoints'
 import type { XSummary } from '../../shared/types'
 import { Loader2, Trash2, ExternalLink, Sparkles, AlertCircle, RotateCcw, Languages } from 'lucide-react'
+import { Button } from '../components/ui/Button'
+import { Badge } from '../components/ui/Badge'
 
-const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
-  done: { cls: 'text-success bg-success/10 border-success/30', label: 'Fertig' },
-  processing: { cls: 'text-primary bg-primary/10 border-primary/30 animate-pulse-slow', label: 'Verarbeite...' },
-  error: { cls: 'text-danger bg-danger/10 border-danger/30', label: 'Fehler' },
+const STATUS_BADGE: Record<string, { variant: 'success' | 'primary' | 'danger'; label: string }> = {
+  done: { variant: 'success', label: 'Fertig' },
+  processing: { variant: 'primary', label: 'Verarbeite...' },
+  error: { variant: 'danger', label: 'Fehler' },
 }
 
 function isXUrl(url: string): boolean {
@@ -100,9 +102,9 @@ export default function XView() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-slate-900 mb-4">X Zusammenfassen</h2>
+      <h2 className="text-lg font-semibold text-content mb-4">X Zusammenfassen</h2>
 
-      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6">
+      <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-4 mb-6">
         <div className="flex gap-2">
           <input
             ref={inputRef}
@@ -115,49 +117,44 @@ export default function XView() {
             }}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmit() }}
             placeholder="https://x.com/i/status/..."
-            className="flex-1 px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="flex-1 px-3 py-2.5 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
-          <button
-            onClick={handleSubmit}
-            disabled={submitting || !url.trim()}
-            className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Zusammenfassen
-          </button>
+          <Button onClick={handleSubmit} disabled={submitting || !url.trim()} loading={submitting}>
+            <Sparkles className="w-4 h-4" /> Zusammenfassen
+          </Button>
         </div>
         {error && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{error}</p>}
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-slate-400">
+        <div className="flex items-center justify-center py-12 text-dim">
           <Loader2 className="w-5 h-5 animate-spin mr-2" /> Lade...
         </div>
       ) : items.length === 0 ? (
-        <p className="text-center text-sm text-slate-400 py-12">Noch keine X-Posts zusammengefasst.</p>
+        <p className="text-center text-sm text-dim py-12">Noch keine X-Posts zusammengefasst.</p>
       ) : (
         <div className="space-y-2">
           {items.map(item => {
             const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.error
             return (
-              <div key={item.id} className="bg-white border border-slate-200 rounded-xl p-4">
+              <div key={item.id} className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-4">
                 <div className="flex items-start gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       {item.author && (
-                        <span className="text-xs font-medium text-slate-600">@{item.author.replace(/^@/, '')}</span>
+                        <span className="text-xs font-medium text-muted">@{item.author.replace(/^@/, '')}</span>
                       )}
                       <a
                         href={item.tweetUrl}
                         target="_blank"
                         rel="noopener"
-                        className="text-[10px] text-slate-400 hover:text-primary transition-colors flex items-center gap-0.5"
+                        className="text-[10px] text-dim hover:text-primary transition-colors flex items-center gap-0.5"
                       >
                         <ExternalLink className="w-3 h-3" /> {item.tweetUrl.slice(0, 50)}
                       </a>
                     </div>
                     {item.summary && (
-                      <p className="text-sm text-slate-800 leading-relaxed">{item.summary}</p>
+                      <p className="text-sm text-content leading-relaxed">{item.summary}</p>
                     )}
                     {item.status === 'done' && (
                       <button
@@ -166,7 +163,8 @@ export default function XView() {
                           : handleTranslate(item.id)
                         }
                         disabled={translating === item.id}
-                        className={`mt-2 flex items-center gap-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${translations[item.id] ? 'text-primary hover:text-primary/70' : 'text-slate-400 hover:text-primary'}`}
+                        className={`mt-2 flex items-center gap-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${translations[item.id] ? 'text-primary hover:text-primary/70' : 'text-dim hover:text-primary'}`}
+                        type="button"
                       >
                         {translating === item.id
                           ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -175,8 +173,8 @@ export default function XView() {
                       </button>
                     )}
                     {translations[item.id] && (
-                      <div className="mt-3 pt-3 border-t border-slate-200">
-                        <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{translations[item.id]}</p>
+                      <div className="mt-3 pt-3 border-t border-surfaceBorder">
+                        <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{translations[item.id]}</p>
                       </div>
                     )}
                     {item.status === 'error' && item.errorMessage && (
@@ -184,29 +182,33 @@ export default function XView() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${badge.cls}`}>
-                      {item.status === 'processing'
-                        ? <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />{badge.label}</span>
-                        : badge.label}
-                    </span>
+                    <Badge variant={badge.variant} size="xs" className={item.status === 'processing' ? 'animate-pulse-slow' : undefined}>
+                      {item.status === 'processing' && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {badge.label}
+                    </Badge>
                     {item.status === 'error' && (
-                      <button
+                      <Button
+                        size="xs"
+                        variant="primary"
+                        outline
                         onClick={() => handleRetry(item.id)}
                         disabled={retrying === item.id}
-                        className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-primary bg-primary/10 border border-primary/30 rounded hover:bg-primary/20 transition-colors disabled:opacity-50"
                         title="Erneut versuchen"
                       >
                         {retrying === item.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                         Retry
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      iconOnly
                       onClick={() => handleDelete(item.id)}
-                      className="text-slate-300 hover:text-danger transition-colors"
                       title="Löschen"
+                      className="text-dim hoverable:text-danger"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>

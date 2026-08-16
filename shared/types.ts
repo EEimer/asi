@@ -15,6 +15,14 @@ export interface YouTubeVideo {
 
 export type SummaryStatus = 'processing' | 'done' | 'error'
 
+/** Detailgrad: `short` = nur die Kernaussagen, `long` = die volle Struktur. */
+export type SummaryDetail = 'short' | 'long'
+
+export const SUMMARY_DETAIL_LABELS: Record<SummaryDetail, string> = {
+  short: 'Kurz',
+  long: 'Lang',
+}
+
 export interface Summary {
   id: string
   videoId: string
@@ -25,6 +33,7 @@ export interface Summary {
   model: string
   thumbnailUrl: string
   lang: string
+  detail: SummaryDetail
   transcript: string
   summary: string
   customPrompt: string
@@ -42,6 +51,7 @@ export interface CreateSummaryRequest {
   thumbnailUrl?: string
   lang?: string
   model?: string
+  detail?: SummaryDetail
 }
 
 export interface Note {
@@ -128,6 +138,8 @@ export interface ProcessingEvent {
 
 export interface Settings {
   summaryPrompt: string
+  /** Prompt für die Kurzversion — nur die 2-3 Kernaussagen. */
+  shortSummaryPrompt: string
   defaultLang: string
   cookieBrowser: string
   openaiModel: string
@@ -266,6 +278,46 @@ Wenn keine Prognosen genannt werden: Abschnitt weglassen.
 - Antworte immer auf Deutsch
 - So kurz wie möglich, so ausführlich wie nötig
 - Keine Einleitung außer den Metadaten
+
+Transkript:
+`,
+  shortSummaryPrompt: `Du bist ein Experte für extrem knappe Zusammenfassungen von YouTube-Videos.
+
+## Metadaten (immer zuerst ausgeben)
+- **Hauptsprecher / Interviewpartner:** [Name der Person, die die inhaltlichen Aussagen trifft – NICHT der Kanalinhaber, falls es ein Interview ist. Falls unklar, weglassen.]
+
+---
+
+## Kernaussagen
+- Nur die 2-3 wichtigsten Aussagen des Videos, maximal 4
+- Ein Satz pro Punkt, die wichtigste Aussage zuerst
+- Keine Details, keine Beispiele, keine Nebenschauplätze
+- Werbung, Sponsoring und Off-Topic werden ignoriert
+
+---
+
+## Assets & Prognosen
+Falls im Video konkrete Assets, Prognosen oder Kursziele genannt werden, gib diese als JSON zurück:
+
+\`\`\`json
+[
+  {
+    "name": "Bitcoin",
+    "direction": "long",
+    "if_cases": "Falls Fed Zinsen senkt",
+    "price_target": "$120.000"
+  }
+]
+\`\`\`
+
+Wenn keine Prognosen genannt werden: Abschnitt weglassen.
+
+---
+
+## Sprache & Regeln
+- Antworte immer auf Deutsch
+- Keine Einleitung, kein Fazit, kein Fließtext — nur Bullet Points
+- Lieber zu kurz als zu lang
 
 Transkript:
 `,

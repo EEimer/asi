@@ -3,11 +3,21 @@ import { useToast, type ToastMessage } from '../store/toastStore'
 import { Check, AlertCircle, Info, AlertTriangle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
+/**
+ * BEWUSSTE AUSNAHME von der Token-Regel – nicht auf success/danger/warning umstellen.
+ *
+ * Ein Token ist ein Farbton; ein Toast braucht drei Ebenen (Rahmen, Fläche, Schrift),
+ * die in Light und Dark unterschiedlich weit auseinanderliegen: hell eine zarte
+ * 50er-Fläche mit kräftiger 700er-Schrift, dunkel eine tiefe 950er-Fläche mit heller
+ * 200er-Schrift. Mit `bg-success/10 text-success` kollabiert das zu einem Ton und
+ * wirkt ausgewaschen. Der Toast liegt ausserdem frei über dem Inhalt, nicht auf einer
+ * Panel-Fläche – er braucht eine eigene, deckende Grundfarbe. (1:1 aus ../wealth)
+ */
 const toneStyles: Record<ToastMessage['tone'], string> = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  error: 'border-rose-200 bg-rose-50 text-rose-700',
-  warning: 'border-amber-200 bg-amber-50 text-amber-700',
-  info: 'border-slate-200 bg-white text-slate-700',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-950/60 dark:text-emerald-200',
+  error: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-950/60 dark:text-rose-200',
+  warning: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-orange-400/50 dark:bg-[#3d2800] dark:text-orange-300',
+  info: 'border-surfaceBorder bg-panel text-content dark:border-white/10 dark:bg-[#2e2e38]',
 }
 
 const toneIcons: Record<ToastMessage['tone'], typeof Check> = {

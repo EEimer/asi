@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '../utils'
+import {
+  controlHeight,
+  segmentedItemPadding,
+  segmentedPillInset,
+  segmentedRootPadding,
+  type ControlSize,
+} from './ui/controlSizes'
 
 interface SegmentedControlProps<T extends string> {
   values: T[]
   labels?: ReactNode[]
   value: T
   onChange: (value: T) => void
+  /** Gleiche Skala wie Button – ein Segment neben einem Button braucht dessen Höhe. */
+  size?: ControlSize
   className?: string
 }
 
@@ -14,6 +23,7 @@ export function SegmentedControl<T extends string>({
   labels,
   value,
   onChange,
+  size = 'md',
   className,
 }: SegmentedControlProps<T>) {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
@@ -48,10 +58,20 @@ export function SegmentedControl<T extends string>({
   }, [values, value])
 
   return (
-    <div className={cn('relative flex gap-1 rounded-lg border border-slate-300 bg-white p-1 shadow-sm', className)}>
+    // Track ist die Control-Fläche (surface-2), nicht die Kartenfarbe – so hebt sich
+    // die aktive Pille in beiden Themes ab. Der Schatten ist eine Light-Dekoration.
+    <div className={cn(
+      'relative flex items-center gap-1 rounded-lg border border-surfaceBorder bg-inputBg shadow-sm dark:shadow-none',
+      /* Feste Höhe aus derselben Skala wie Button. Vorher ergab sie sich aus
+         Padding + geerbter line-height – ein text-xs am Elternknoten machte den
+         Track dadurch 34px hoch und damit 2px höher als der h-8-Button daneben. */
+      controlHeight[size],
+      segmentedRootPadding[size],
+      className,
+    )}>
       {activeSize && activeSize.width > 0 && (
         <div
-          className="absolute top-1 h-[calc(100%-0.5rem)] rounded-md bg-primary transition-all duration-300 ease-out"
+          className={cn('absolute rounded-inner bg-primary transition-all duration-300 ease-out', segmentedPillInset[size])}
           style={{
             width: `${activeSize.width}px`,
             left: `${activeSize.left}px`,
@@ -65,9 +85,10 @@ export function SegmentedControl<T extends string>({
           type="button"
           onClick={() => onChange(val)}
           className={cn(
-            'relative z-10 rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-200',
-            val === value ? 'text-white' : 'text-slate-600 hover:bg-primary/10 hover:text-primary',
-            className?.includes('mini') && 'px-2 py-1 text-[11px]',
+            /* h-full statt py-*: die Höhe kommt vom Track, nicht aus der Schriftgrösse. */
+            'relative z-10 flex h-full items-center justify-center rounded-inner font-medium transition-colors duration-200',
+            segmentedItemPadding[size],
+            val === value ? 'text-white' : 'text-muted hover:bg-primary/10 hover:text-primary',
           )}
         >
           {displayLabels[index]}

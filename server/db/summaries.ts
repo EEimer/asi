@@ -1,9 +1,12 @@
 import db from './database'
-import type { ChatMessage, Summary, SummaryListItem } from '../../shared/types'
+import type { ChatMessage, Summary, SummaryDetail, SummaryListItem } from '../../shared/types'
 
-const LIST_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries ORDER BY created_at DESC`
+/** Spalten der Listen-Payload — ohne transcript/custom_prompt, die bläht die Liste nur auf. */
+const LIST_COLUMNS = `id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, detail, summary, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt`
 
-const DETAIL_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, transcript, summary, custom_prompt AS customPrompt, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries WHERE id = ?`
+const LIST_QUERY = `SELECT ${LIST_COLUMNS} FROM summaries ORDER BY created_at DESC`
+
+const DETAIL_QUERY = `SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, detail, transcript, summary, custom_prompt AS customPrompt, status, error_message AS errorMessage, replace(created_at,' ','T')||'Z' AS createdAt FROM summaries WHERE id = ?`
 
 export function getAllSummaries(): SummaryListItem[] {
   return db.query(LIST_QUERY).all() as SummaryListItem[]
@@ -11,7 +14,7 @@ export function getAllSummaries(): SummaryListItem[] {
 
 export function getSummariesPage(offset: number, limit: number): SummaryListItem[] {
   return db.query(
-    'SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,\' \',\'T\')||\'Z\' AS createdAt FROM summaries ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    `SELECT ${LIST_COLUMNS} FROM summaries ORDER BY created_at DESC LIMIT ? OFFSET ?`,
   ).all(limit, offset) as SummaryListItem[]
 }
 
@@ -26,7 +29,7 @@ export function getSummaryById(id: string): Summary | null {
 
 export function getSummariesByVideoId(videoId: string): SummaryListItem[] {
   return db.query(
-    'SELECT id, video_id AS videoId, video_url AS videoUrl, video_title AS videoTitle, channel_name AS channelName, author, model, thumbnail_url AS thumbnailUrl, lang, summary, status, error_message AS errorMessage, replace(created_at,\' \',\'T\')||\'Z\' AS createdAt FROM summaries WHERE video_id = ? ORDER BY created_at DESC',
+    `SELECT ${LIST_COLUMNS} FROM summaries WHERE video_id = ? ORDER BY created_at DESC`,
   ).all(videoId) as SummaryListItem[]
 }
 
@@ -41,9 +44,9 @@ export function getSummarizedVideoIds(): Map<string, string> {
   return map
 }
 
-export function createSummary(videoId: string, videoUrl: string, lang: string, model: string, title = '', channel = '', thumbnail = ''): string {
+export function createSummary(videoId: string, videoUrl: string, lang: string, model: string, title = '', channel = '', thumbnail = '', detail: SummaryDetail = 'long'): string {
   const id = `${Date.now()}_${videoId}`
-  db.query('INSERT INTO summaries (id, video_id, video_url, lang, model, video_title, channel_name, thumbnail_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, videoId, videoUrl, lang, model, title, channel, thumbnail)
+  db.query('INSERT INTO summaries (id, video_id, video_url, lang, model, video_title, channel_name, thumbnail_url, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, videoId, videoUrl, lang, model, title, channel, thumbnail, detail)
   return id
 }
 

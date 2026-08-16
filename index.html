@@ -5,8 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ASI – YouTube Summaries</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
+  <!-- Theme vor dem ersten Paint setzen. Ohne das blitzt die helle Seite auf, bevor
+       das JS-Bundle geladen ist. Muss der Logik in src/store/themeStore.ts folgen. -->
+  <script>
+    try {
+      var t = localStorage.getItem('asi_theme')
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      if (t === 'dark') document.documentElement.classList.add('dark')
+    } catch (e) {}
+  </script>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased">
+<body class="antialiased">
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
