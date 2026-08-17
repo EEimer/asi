@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { fetchNotes, createNoteApi, updateNoteApi, markNoteDoneApi, deleteNoteApi } from '../api/endpoints'
 import type { Note } from '../../shared/types'
-import { Plus, Pencil, Trash2, Loader2, StickyNote, CheckCircle2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, StickyNote, CheckCircle2 } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
 import { ConfirmModal } from '../components/ConfirmModal'
-import { Button } from '../components/ui/Button'
+import { Button, Card, Input, Textarea, SkeletonList } from '../components/ui'
 
 export default function NotesView() {
   const [notes, setNotes] = useState<Note[]>([])
@@ -70,7 +70,7 @@ export default function NotesView() {
     setNotes(prev => prev.filter(n => n.id !== id))
   }
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+  if (loading) return <SkeletonList count={3} />
 
   return (
     <div>
@@ -87,20 +87,20 @@ export default function NotesView() {
       ) : (
         <div className="grid gap-3">
           {notes.map(n => (
-            <div key={n.id} className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-4 card-interactive">
+            <Card key={n.id} className="card-interactive">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(n)}>
                   <h3 className="font-semibold text-content text-sm">
                     {n.title || 'Ohne Titel'}
                     <span className="font-normal text-dim"> — {new Date(n.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                     {n.updatedAt !== n.createdAt && <span className="font-normal text-[10px] text-dim ml-1 italic">(bearbeitet)</span>}
-                    {!!n.isTodo ? (
+                    {n.isTodo ? (
                       <span className="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-warning bg-warning/10 border border-warning/30 rounded-full">TODO</span>
                     ) : (
                       <span className="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-sky bg-sky/10 border border-sky/30 rounded-full">INFO</span>
                     )}
                   </h3>
-                  {n.text && <p className="text-xs text-muted mt-1 whitespace-pre-wrap break-words">{n.text}</p>}
+                  {n.text && <p className="text-xs text-content/70 mt-1 whitespace-pre-wrap break-words">{n.text}</p>}
                 </div>
                 <div className="flex gap-1 shrink-0">
                   {!!n.isTodo && (
@@ -116,35 +116,35 @@ export default function NotesView() {
                   </Button>
                 </div>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editNote ? 'Notiz bearbeiten' : 'Neue Notiz'}>
         <div className="space-y-3">
-          <input
+          <Input
             type="text"
             placeholder="Titel"
             value={title}
             onChange={e => setTitle(e.target.value)}
             autoFocus
-            className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+            
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) e.preventDefault() }}
           />
-          <textarea
+          <Textarea
             placeholder="Notiz..."
             value={text}
             onChange={e => setText(e.target.value)}
             rows={6}
-            className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+            className="resize-y"
           />
           <label className="inline-flex items-center gap-2 text-sm text-muted">
             <input
               type="checkbox"
               checked={isTodo}
               onChange={e => setIsTodo(e.target.checked)}
-              className="w-4 h-4 rounded border-surfaceBorder text-primary focus:ring-primary/30"
+              className="w-4 h-4 rounded-sm border-surfaceBorder text-primary focus-visible:ring-2 focus-visible:ring-primary/40"
             />
             TODO
           </label>

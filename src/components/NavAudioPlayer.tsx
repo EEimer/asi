@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Loader2, Pause, Play, Volume2 } from 'lucide-react'
 import { useAudioPlayer } from '../store/audioPlayerStore'
-import { Button } from './ui/Button'
+import { Button } from './ui'
 
 function formatTime(seconds: number, fallback = '00:00'): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return fallback

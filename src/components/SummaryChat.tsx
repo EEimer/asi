@@ -6,8 +6,8 @@ import { DEFAULT_SETTINGS, type ChatMessage } from '../../shared/types'
 import { ChatBubble } from './ChatBubble'
 import { ChatComposer } from './ChatComposer'
 import { ConfirmModal } from './ConfirmModal'
-import { Button } from './ui/Button'
 import { useToast } from '../store/toastStore'
+import { Button } from './ui'
 
 interface SummaryChatProps {
   summaryId: string

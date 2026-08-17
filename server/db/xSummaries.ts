@@ -1,16 +1,5 @@
 import db from './database'
-
-export interface XSummary {
-  id: string
-  tweetId: string
-  tweetUrl: string
-  author: string
-  tweetText: string
-  summary: string
-  status: 'processing' | 'done' | 'error'
-  errorMessage: string
-  createdAt: string
-}
+import type { XSummary } from '../../shared/types'
 
 function row(r: any): XSummary {
   return {

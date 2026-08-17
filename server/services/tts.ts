@@ -4,18 +4,18 @@ import { dirname, join } from 'node:path'
 import { OPENAI_API_KEY } from '../config'
 import { fetchOrThrow, withRetry, type RetryNotifier } from './retry'
 import type { TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, TtsVariantConfig, TtsVariantIndexEntry } from '../../shared/types'
+import {
+  DEFAULT_TTS_VOICE,
+  estimateDurationSecondsFromText,
+  isVoiceCompatible,
+  normalizeInstructions,
+  variantMatches,
+} from '../../shared/tts'
 
 const TTS_DIR = join(import.meta.dir, '../data/tts')
 const INDEX_PATH = join(TTS_DIR, 'index.json')
 
-const CLASSIC_VOICES = new Set<TtsVoice>(['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer'])
-const EXTENDED_ONLY_VOICES = new Set<TtsVoice>(['ballad', 'verse', 'marin', 'cedar'])
 const MAX_TTS_INPUT_CHARS = 3900
-const AVG_TTS_CHARS_PER_SECOND = 14
-
-function normalizeInstructions(value: string): string {
-  return value.trim()
-}
 
 export function ensureTtsStorage() {
   if (!existsSync(TTS_DIR)) mkdirSync(TTS_DIR, { recursive: true })
@@ -42,14 +42,8 @@ export function getTtsIndex(): TtsIndex {
   return readIndex()
 }
 
-function isVoiceCompatible(model: TtsModel, voice: TtsVoice): boolean {
-  if (model === 'gpt-4o-mini-tts') return CLASSIC_VOICES.has(voice) || EXTENDED_ONLY_VOICES.has(voice)
-  return CLASSIC_VOICES.has(voice)
-}
-
 function fallbackVoiceForModel(model: TtsModel, voice: TtsVoice): TtsVoice {
-  if (isVoiceCompatible(model, voice)) return voice
-  return 'nova'
+  return isVoiceCompatible(model, voice) ? voice : DEFAULT_TTS_VOICE
 }
 
 export function buildVariantKey(config: TtsVariantConfig): string {
@@ -73,25 +67,12 @@ function upsertIndexEntry(summaryId: string, variantKey: string, entry: TtsVaria
   writeIndex(index)
 }
 
-function estimateDurationSecondsFromText(text: string): number {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return 0
-  return Math.max(1, Math.round(normalized.length / AVG_TTS_CHARS_PER_SECOND))
-}
-
 export function findVariantByConfig(summaryId: string, config: TtsVariantConfig): { variantKey: string; entry: TtsVariantIndexEntry } | null {
   const index = readIndex()
   const summaryEntry = index[summaryId]
   if (!summaryEntry) return null
-  const normalizedInstructions = normalizeInstructions(config.instructions)
   for (const [variantKey, variant] of Object.entries(summaryEntry.variants)) {
-    if (
-      variant.model === config.model
-      && variant.voice === config.voice
-      && normalizeInstructions(variant.instructions) === normalizedInstructions
-    ) {
-      return { variantKey, entry: variant }
-    }
+    if (variantMatches(variant, config)) return { variantKey, entry: variant }
   }
   return null
 }

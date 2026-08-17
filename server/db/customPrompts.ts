@@ -1,12 +1,5 @@
 import db from './database'
-
-export interface CustomPrompt {
-  id: string
-  title: string
-  text: string
-  createdAt: string
-  updatedAt: string
-}
+import type { CustomPrompt } from '../../shared/types'
 
 const SELECT_FIELDS = `id, title, text, replace(created_at,' ','T')||'Z' AS createdAt, replace(updated_at,' ','T')||'Z' AS updatedAt`
 

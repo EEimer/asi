@@ -1,5 +1,5 @@
 import { Modal, ModalFooter } from './Modal'
-import { Button } from './ui/Button'
+import { Button } from './ui'
 
 type ConfirmModalProps = {
   open: boolean

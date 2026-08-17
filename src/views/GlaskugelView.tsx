@@ -5,8 +5,7 @@ import type { Prediction } from '../../shared/types'
 import { Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2, Plus } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
-import { Button } from '../components/ui/Button'
-import { Badge } from '../components/ui/Badge'
+import { Badge, Button, Card, Input, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableHeaderRow, TableRow, microLabelClass } from '../components/ui'
 
 type DirectionVariant = 'success' | 'danger' | 'secondary'
 
@@ -102,8 +101,8 @@ export default function GlaskugelView() {
         </Button>
       </div>
 
-      <input type="text" placeholder="Filtern nach Asset, Kanal, Richtung..." value={filter} onChange={e => setFilter(e.target.value)}
-        className="w-full mb-4 px-4 py-2.5 bg-inputBg border border-surfaceBorder rounded-lg text-sm text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40" />
+      <Input type="text" placeholder="Filtern nach Asset, Kanal, Richtung..." value={filter} onChange={e => setFilter(e.target.value)}
+        className="mb-4" />
 
       {predictions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-dim">
@@ -111,24 +110,26 @@ export default function GlaskugelView() {
           <p className="text-xs">Fasse Videos zusammen und füge Prognosen über die Zusammenfassung hinzu</p>
         </div>
       ) : (
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-surfaceBorder bg-inputBg">
-                <th className="text-left px-4 py-3 font-semibold text-content">Asset</th>
-                <th className="text-left px-4 py-3 font-semibold text-content">Richtung</th>
-                <th className="text-left px-4 py-3 font-semibold text-content">Kursziel</th>
-                <th className="text-left px-4 py-3 font-semibold text-content">Bedingung</th>
-                <th className="text-left px-4 py-3 font-semibold text-content">Quelle</th>
-                <th className="w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="overflow-hidden">
+          <Table className="[&_th]:px-4 [&_td]:px-4">
+            <TableHeader>
+              <TableHeaderRow withBorder>
+                <TableHeaderCell>Asset</TableHeaderCell>
+                <TableHeaderCell>Richtung</TableHeaderCell>
+                <TableHeaderCell>Kursziel</TableHeaderCell>
+                <TableHeaderCell>Bedingung</TableHeaderCell>
+                <TableHeaderCell>Quelle</TableHeaderCell>
+                <TableHeaderCell className="w-10" />
+              </TableHeaderRow>
+            </TableHeader>
+            <TableBody>
               {grouped.map(group => (
                 <>{/* Fragment with key on the separator row */}
-                  <tr key={`sep-${group.date}`}>
-                    <td colSpan={6} className="px-4 py-2 bg-rowHover/50 border-t border-surfaceBorderSoft">
-                      <span className="text-xs font-medium text-muted">{group.label}</span>
+                  {/* Datums-Trenner: kein TableRow – er ist keine Datenzeile und
+                      soll weder Hover noch Zeilentrenner tragen. */}
+                  <tr key={`sep-${group.date}`} className="border-t border-surfaceBorderSoft bg-rowHover/50">
+                    <td colSpan={6} className="px-4 py-2">
+                      <span className={microLabelClass}>{group.label}</span>
                     </td>
                   </tr>
                   {group.items.map(p => {
@@ -136,16 +137,16 @@ export default function GlaskugelView() {
                     const DirIcon = ds.icon
                     const hasAuthor = !!p.author && !/^(nicht angegeben|unbekannt|unknown|n\/a|-|–)$/i.test(p.author.trim())
                     return (
-                      <tr key={p.id} className="border-t border-surfaceBorderSoft row-interactive">
-                        <td className="px-4 py-2.5 font-medium text-content">{p.assetName}</td>
-                        <td className="px-4 py-2.5">
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium text-content">{p.assetName}</TableCell>
+                        <TableCell>
                           <Badge variant={ds.variant}>
                             <DirIcon className="w-3 h-3 shrink-0" /> {p.direction}
                           </Badge>
-                        </td>
-                        <td className="px-4 py-2.5 text-muted">{p.priceTarget}</td>
-                        <td className="px-4 py-2.5 text-muted text-xs max-w-xs">{p.ifCases}</td>
-                        <td className="px-4 py-2.5">
+                        </TableCell>
+                        <TableCell className="text-muted">{p.priceTarget}</TableCell>
+                        <TableCell className="text-muted text-xs max-w-xs">{p.ifCases}</TableCell>
+                        <TableCell>
                           {p.summaryId ? (
                             <div className="flex items-center gap-2">
                               <Link to={`/summaries/${p.summaryId}`} className="text-xs text-primary hover:underline truncate max-w-[150px]" title={p.videoTitle}>
@@ -162,20 +163,20 @@ export default function GlaskugelView() {
                           )}
                           <div className="text-xs text-muted truncate max-w-[180px]" title={hasAuthor ? p.author! : undefined}>{hasAuthor ? p.author : '—'}</div>
                           <div className="text-xs text-dim truncate max-w-[180px]" title={p.channelName}>{p.channelName}</div>
-                        </td>
-                        <td className="w-10 px-2 py-2.5 text-center">
+                        </TableCell>
+                        <TableCell className="w-10 px-2 text-center">
                           <Button size="xs" variant="ghost" iconOnly onClick={() => setDeleteTarget(p.id)} className="text-dim hoverable:text-danger" title="Löschen">
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     )
                   })}
                 </>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
       <ConfirmModal
@@ -192,13 +193,13 @@ export default function GlaskugelView() {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-content mb-1">Asset <span className="text-danger">*</span></label>
-            <input
+            <Input
               autoFocus
               type="text"
               value={form.asset}
               onChange={e => setForm(f => ({ ...f, asset: e.target.value }))}
               placeholder="z. B. Bitcoin, S&P 500, Tesla"
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+              
             />
           </div>
 
@@ -221,45 +222,45 @@ export default function GlaskugelView() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-content mb-1">Kursziel</label>
-              <input
+              <Input
                 type="text"
                 value={form.priceTarget}
                 onChange={e => setForm(f => ({ ...f, priceTarget: e.target.value }))}
                 placeholder="z. B. $120.000"
-                className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+                
               />
             </div>
             <div>
               <label className="block text-xs font-medium text-content mb-1">Autor</label>
-              <input
+              <Input
                 type="text"
                 value={form.author}
                 onChange={e => setForm(f => ({ ...f, author: e.target.value }))}
                 placeholder="Name"
-                className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+                
               />
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-medium text-content mb-1">Bedingung</label>
-            <input
+            <Input
               type="text"
               value={form.ifCases}
               onChange={e => setForm(f => ({ ...f, ifCases: e.target.value }))}
               placeholder="z. B. Falls Fed Zinsen senkt"
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+              
             />
           </div>
 
           <div>
             <label className="block text-xs font-medium text-content mb-1">Quelle</label>
-            <input
+            <Input
               type="text"
               value={form.videoTitle}
               onChange={e => setForm(f => ({ ...f, videoTitle: e.target.value }))}
               placeholder="z. B. Bloomberg Artikel, eigene Analyse"
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+              
             />
           </div>
 

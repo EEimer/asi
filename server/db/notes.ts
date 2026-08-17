@@ -1,14 +1,5 @@
 import db from './database'
-
-export interface Note {
-  id: string
-  title: string
-  text: string
-  isTodo: boolean
-  isDone: boolean
-  createdAt: string
-  updatedAt: string
-}
+import type { Note } from '../../shared/types'
 
 const LIST_QUERY = `SELECT id, title, text, is_todo AS isTodo, is_done AS isDone, replace(created_at,' ','T')||'Z' AS createdAt, replace(updated_at,' ','T')||'Z' AS updatedAt FROM notes WHERE is_done = 0 ORDER BY updated_at DESC`
 

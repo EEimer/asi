@@ -42,7 +42,8 @@ export interface Summary {
   createdAt: string
 }
 
-export interface SummaryListItem extends Omit<Summary, 'transcript' | 'customPrompt'> {}
+/** Listeneintrag: alles ausser den beiden grossen Textfeldern. */
+export type SummaryListItem = Omit<Summary, 'transcript' | 'customPrompt'>
 
 export interface CreateSummaryRequest {
   videoUrl: string
@@ -76,6 +77,14 @@ export interface Prediction {
   ifCases: string
   priceTarget: string
   createdAt: string
+}
+
+/** Aus dem Zusammenfassungs-Text geparste Prognose — Rohform vor dem Insert. */
+export interface PredictionRow {
+  asset: string
+  direction: string
+  ifCases: string
+  priceTarget: string
 }
 
 export type TtsModel = 'tts-1' | 'tts-1-hd' | 'gpt-4o-mini-tts'
@@ -149,6 +158,15 @@ export interface Settings {
   ttsInstructions: string
   /** Max. gleichzeitige OpenAI/Anthropic-Requests. Niedriger = weniger 429er. */
   apiConcurrency: number
+}
+
+/** Gespeicherte Prompt-Vorlage für einmalige Zusammenfassungen. */
+export interface CustomPrompt {
+  id: string
+  title: string
+  text: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface XSummary {

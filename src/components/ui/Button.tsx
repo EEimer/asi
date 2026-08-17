@@ -87,6 +87,9 @@ export type ButtonVariant = NonNullable<ButtonVariantProps['variant']> | 'outlin
  * Link-Buttons ihre Klassen wieder von Hand zusammensetzen – genau die Stelle, an
  * der die Bauformen frueher auseinanderliefen.
  */
+/* eslint-disable-next-line react-refresh/only-export-components --
+   buttonClasses gehoert neben die cva-Definition: eine zweite Datei muesste die
+   Variantentabelle importieren oder duplizieren. Kostet nur Fast Refresh hier. */
 export function buttonClasses(
   opts: Omit<ButtonVariantProps, 'variant'> & { variant?: ButtonVariant } = {},
   className?: string,

@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { fetchSettings, updateSettings, resetTable, fetchCustomPrompts, createCustomPromptApi, updateCustomPromptApi, deleteCustomPromptApi } from '../api/endpoints'
-import type { CustomPrompt } from '../api/endpoints'
-import type { Settings, TtsModel, TtsVoice, ModelTier } from '../../shared/types'
+import type { CustomPrompt, Settings, TtsModel, TtsVoice, ModelTier } from '../../shared/types'
 import { DEFAULT_SETTINGS, MODEL_OPTIONS, MODEL_TIER_LABELS, LEGACY_MODEL_LABELS } from '../../shared/types'
+import { ttsVoiceOptions, reconcileConfigForModel } from '../../shared/tts'
 import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SegmentedControl } from '../components/SegmentedControl'
-import { Button } from '../components/ui/Button'
 import { useToast } from '../store/toastStore'
 import { useTheme, type Theme } from '../store/themeStore'
+import { Button, Card, Input, Select, Textarea, SettingRow } from '../components/ui'
 
 const LANG_OPTIONS = [
   { value: 'de', label: 'Deutsch' },
@@ -36,14 +36,6 @@ const TTS_MODEL_OPTIONS: { value: TtsModel; label: string; hint: string }[] = [
   { value: 'tts-1-hd', label: 'tts-1-hd', hint: 'Beste Qualität (~$30/1M chars, ~$0.030/min)' },
   { value: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts', hint: 'Steuerbar via Instruktionen (~$15/1M chars, ~$0.015/min)' },
 ]
-
-const TTS_CLASSIC_VOICES: TtsVoice[] = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']
-const TTS_EXTENDED_VOICES: TtsVoice[] = ['ballad', 'verse', 'marin', 'cedar']
-
-function availableVoices(model: TtsModel): TtsVoice[] {
-  if (model === 'gpt-4o-mini-tts') return [...TTS_CLASSIC_VOICES, ...TTS_EXTENDED_VOICES]
-  return TTS_CLASSIC_VOICES
-}
 
 type DangerTarget = 'summaries' | 'notes' | 'predictions' | 'settings' | null
 
@@ -103,25 +95,32 @@ export default function SettingsView() {
     setSettings({ ...lastSavedSettings })
   }
 
+  /* Die Blockliste schreibt sofort, der Rest des Formulars erst auf "Speichern".
+     Damit Abbrechen und ein späteres Speichern nicht mit einer veralteten Liste
+     gegen den Server laufen, wird lastSavedSettings hier mitgezogen. */
+  function persistBlockedChannels(updated: string[]) {
+    setSettings(s => ({ ...s, blockedChannels: updated }))
+    updateSettings({ blockedChannels: updated })
+      .then(() => setLastSavedSettings(s => ({ ...s, blockedChannels: updated })))
+      .catch((e: any) => addToast(`Blockliste nicht gespeichert: ${e.message}`, 'error', 5000))
+  }
+
   function addBlockedChannel(name: string) {
     if (!name || settings.blockedChannels.some(c => c.toLowerCase() === name.toLowerCase())) return
-    const updated = [...settings.blockedChannels, name]
-    setSettings(s => ({ ...s, blockedChannels: updated }))
-    updateSettings({ blockedChannels: updated }).catch(console.error)
+    persistBlockedChannels([...settings.blockedChannels, name])
   }
 
   function removeBlockedChannel(name: string) {
-    const updated = settings.blockedChannels.filter(c => c !== name)
-    setSettings(s => ({ ...s, blockedChannels: updated }))
-    updateSettings({ blockedChannels: updated }).catch(console.error)
+    persistBlockedChannels(settings.blockedChannels.filter(c => c !== name))
   }
 
   function updateTtsModel(value: TtsModel) {
     setSettings(prev => {
-      const options = availableVoices(value)
-      const nextVoice = options.includes(prev.ttsVoice) ? prev.ttsVoice : 'nova'
-      const nextInstructions = value === 'gpt-4o-mini-tts' ? prev.ttsInstructions : ''
-      return { ...prev, ttsModel: value, ttsVoice: nextVoice, ttsInstructions: nextInstructions }
+      const next = reconcileConfigForModel(
+        { model: prev.ttsModel, voice: prev.ttsVoice, instructions: prev.ttsInstructions },
+        value,
+      )
+      return { ...prev, ttsModel: next.model, ttsVoice: next.voice, ttsInstructions: next.instructions }
     })
   }
 
@@ -183,14 +182,11 @@ export default function SettingsView() {
       <h2 className="text-lg font-semibold text-content mb-6">Einstellungen</h2>
 
       <div className="space-y-6">
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content">Erscheinungsbild</label>
-              <p className="text-xs text-muted mt-0.5">
-                Die Wahl gilt sofort und bleibt im Browser gespeichert. Ohne eigene Wahl folgt die App dem Betriebssystem.
-              </p>
-            </div>
+        <Card className="p-5">
+          <SettingRow
+            label="Erscheinungsbild"
+            description="Die Wahl gilt sofort und bleibt im Browser gespeichert. Ohne eigene Wahl folgt die App dem Betriebssystem."
+          >
             <SegmentedControl<Theme>
               values={['light', 'dark']}
               labels={[
@@ -201,24 +197,24 @@ export default function SettingsView() {
               onChange={setTheme}
               className="shrink-0"
             />
-          </div>
-        </div>
+          </SettingRow>
+        </Card>
 
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5">
+        <Card className="p-5">
           <label className="block text-sm font-medium text-content mb-2">Summary Prompt (Lang)</label>
           <p className="text-xs text-muted mb-3">Dieser Prompt wird vor jedes Transkript gesetzt und an OpenAI geschickt. Das Transkript wird automatisch ans Ende angehängt.</p>
-          <textarea value={settings.summaryPrompt} onChange={e => setSettings(s => ({ ...s, summaryPrompt: e.target.value }))}
-            rows={10} className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y font-mono" />
-        </div>
+          <Textarea value={settings.summaryPrompt} onChange={e => setSettings(s => ({ ...s, summaryPrompt: e.target.value }))}
+            rows={10} className="resize-y font-mono" />
+        </Card>
 
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5">
+        <Card className="p-5">
           <label className="block text-sm font-medium text-content mb-2">Summary Prompt (Kurz)</label>
           <p className="text-xs text-muted mb-3">Wird für den "Kurz"-Button verwendet — nur die wichtigsten Kernaussagen statt der vollen Struktur.</p>
-          <textarea value={settings.shortSummaryPrompt} onChange={e => setSettings(s => ({ ...s, shortSummaryPrompt: e.target.value }))}
-            rows={10} className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y font-mono" />
-        </div>
+          <Textarea value={settings.shortSummaryPrompt} onChange={e => setSettings(s => ({ ...s, shortSummaryPrompt: e.target.value }))}
+            rows={10} className="resize-y font-mono" />
+        </Card>
 
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5">
+        <Card className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div>
               <label className="block text-sm font-medium text-content">Custom Prompts</label>
@@ -245,27 +241,27 @@ export default function SettingsView() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5 grid grid-cols-3 gap-4">
+        <Card className="p-5 grid grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-content mb-2">Sprache</label>
-            <select value={settings.defaultLang} onChange={e => setSettings(s => ({ ...s, defaultLang: e.target.value }))}
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40">
+            <Select value={settings.defaultLang} onChange={e => setSettings(s => ({ ...s, defaultLang: e.target.value }))}
+              >
               {LANG_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <label className="block text-sm font-medium text-content mb-2">Cookie Browser</label>
-            <select value={settings.cookieBrowser} onChange={e => setSettings(s => ({ ...s, cookieBrowser: e.target.value }))}
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40">
+            <Select value={settings.cookieBrowser} onChange={e => setSettings(s => ({ ...s, cookieBrowser: e.target.value }))}
+              >
               {BROWSER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <label className="block text-sm font-medium text-content mb-2">KI Modell</label>
-            <select value={settings.openaiModel} onChange={e => setSettings(s => ({ ...s, openaiModel: e.target.value }))}
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40">
+            <Select value={settings.openaiModel} onChange={e => setSettings(s => ({ ...s, openaiModel: e.target.value }))}
+              >
               {MODEL_TIERS.map(tier => (
                 <optgroup key={tier} label={MODEL_TIER_LABELS[tier]}>
                   {MODEL_OPTIONS.filter(o => o.tier === tier).map(o => (
@@ -282,14 +278,14 @@ export default function SettingsView() {
                   </option>
                 </optgroup>
               )}
-            </select>
+            </Select>
             <p className="mt-1 text-xs text-muted">
               {MODEL_OPTIONS.find(o => o.value === settings.openaiModel)?.hint ?? 'Älteres Modell — auf eine aktuelle Stufe wechseln empfohlen.'}
             </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-content mb-2">Parallele API-Requests</label>
-            <input
+            <Input
               type="number"
               min={1}
               max={10}
@@ -298,59 +294,59 @@ export default function SettingsView() {
                 const n = Number(e.target.value)
                 setSettings(s => ({ ...s, apiConcurrency: Number.isFinite(n) ? Math.min(10, Math.max(1, Math.floor(n))) : 1 }))
               }}
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40"
+              
             />
             <p className="mt-1 text-xs text-muted">
               Wie viele KI-Requests gleichzeitig laufen dürfen. 1 = seriell, empfohlen bei niedrigem Rate Limit (429-Fehler).
               Fehlgeschlagene Requests werden automatisch bis zu 5x wiederholt.
             </p>
           </div>
-        </div>
+        </Card>
 
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5">
+        <Card className="p-5">
           <h3 className="text-sm font-semibold text-content mb-3">Text-to-Speech</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content mb-2">TTS-Modell</label>
-              <select
+              <Select
                 value={settings.ttsModel}
                 onChange={e => updateTtsModel(e.target.value as TtsModel)}
-                className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40"
+                
               >
                 {TTS_MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              </Select>
               <p className="mt-1 text-xs text-muted">
                 {TTS_MODEL_OPTIONS.find(o => o.value === settings.ttsModel)?.hint}
               </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-content mb-2">Stimme</label>
-              <select
+              <Select
                 value={settings.ttsVoice}
                 onChange={e => setSettings(s => ({ ...s, ttsVoice: e.target.value as TtsVoice }))}
-                className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40"
+                
               >
-                {availableVoices(settings.ttsModel).map(voice => {
+                {ttsVoiceOptions(settings.ttsModel).map(voice => {
                   const recommended = settings.ttsModel === 'gpt-4o-mini-tts' && (voice === 'marin' || voice === 'cedar')
                   return <option key={voice} value={voice}>{recommended ? `${voice} - ★ Empfohlen` : voice}</option>
                 })}
-              </select>
+              </Select>
             </div>
           </div>
           {settings.ttsModel === 'gpt-4o-mini-tts' && (
             <div className="mt-4">
               <label className="block text-sm font-medium text-content mb-2">Sprach-Instruktionen</label>
-              <input
+              <Input
                 type="text"
                 value={settings.ttsInstructions}
                 onChange={e => setSettings(s => ({ ...s, ttsInstructions: e.target.value }))}
                 placeholder={'z.B. "Speak slowly and clearly in German"'}
-                className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+                
               />
               <p className="mt-1 text-xs text-muted">Nur verfügbar für gpt-4o-mini-tts. Steuert Ton, Tempo und Stil der Stimme.</p>
             </div>
           )}
-        </div>
+        </Card>
 
         <div className="flex items-center justify-end gap-3">
           <Button onClick={handleSave} disabled={saving} loading={saving}>
@@ -362,16 +358,16 @@ export default function SettingsView() {
           </Button>
         </div>
 
-        <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-5">
+        <Card className="p-5">
           <label className="block text-sm font-medium text-content mb-1">Blockierte Kanäle</label>
           <p className="text-xs text-muted mb-3">Videos von diesen Kanälen werden im Browse-Feed ausgeblendet.</p>
 
           <div className="flex gap-2 mb-3">
-            <input
+            <Input
               type="text"
               id="blocked-channel-input"
               placeholder="Kanalname eingeben..."
-              className="flex-1 px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="flex-1"
               onKeyDown={e => {
                 if (e.key === 'Enter') {
                   const input = e.currentTarget
@@ -408,9 +404,9 @@ export default function SettingsView() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="card-elevation bg-panel border border-danger/30 rounded-xl overflow-hidden">
+        <Card className="border-danger/30 overflow-hidden">
           <div className="flex items-center gap-2 px-5 py-3 bg-danger/10 border-b border-danger/20">
             <AlertTriangle className="w-4 h-4 text-danger" />
             <span className="text-sm font-semibold text-danger">Danger Zone</span>
@@ -434,7 +430,7 @@ export default function SettingsView() {
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       </div>
 
       {dangerTarget && (
@@ -451,20 +447,20 @@ export default function SettingsView() {
 
       <Modal open={promptModalOpen} onClose={() => setPromptModalOpen(false)} title={editPrompt ? 'Prompt bearbeiten' : 'Neuen Prompt erstellen'}>
         <div className="space-y-3">
-          <input
+          <Input
             type="text"
             placeholder="Titel"
             value={promptTitle}
             onChange={e => setPromptTitle(e.target.value)}
             autoFocus
-            className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+            
           />
-          <textarea
+          <Textarea
             placeholder="Prompt-Text..."
             value={promptText}
             onChange={e => setPromptText(e.target.value)}
             rows={8}
-            className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y font-mono"
+            className="resize-y font-mono"
           />
         </div>
         <ModalFooter>

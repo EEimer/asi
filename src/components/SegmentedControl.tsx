@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '../utils'
-import {
-  controlHeight,
-  segmentedItemPadding,
-  segmentedPillInset,
-  segmentedRootPadding,
-  type ControlSize,
-} from './ui/controlSizes'
+import { controlHeight, segmentedItemPadding, segmentedPillInset, segmentedRootPadding, type ControlSize } from './ui'
 
 interface SegmentedControlProps<T extends string> {
   values: T[]

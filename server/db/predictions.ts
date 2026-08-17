@@ -1,30 +1,10 @@
 import db from './database'
-
-export interface Prediction {
-  id: string
-  summaryId: string
-  videoTitle: string
-  videoUrl: string
-  channelName: string
-  author: string
-  assetName: string
-  direction: string
-  ifCases: string
-  priceTarget: string
-  createdAt: string
-}
+import type { Prediction, PredictionRow } from '../../shared/types'
 
 const LIST_QUERY = `SELECT id, summary_id AS summaryId, video_title AS videoTitle, video_url AS videoUrl, channel_name AS channelName, author, asset_name AS assetName, direction, if_cases AS ifCases, price_target AS priceTarget, replace(created_at,' ','T')||'Z' AS createdAt FROM predictions ORDER BY created_at DESC`
 
 export function getAllPredictions(): Prediction[] {
   return db.query(LIST_QUERY).all() as Prediction[]
-}
-
-export interface PredictionRow {
-  asset: string
-  direction: string
-  ifCases: string
-  priceTarget: string
 }
 
 export function insertPredictions(summaryId: string, videoTitle: string, videoUrl: string, channelName: string, author: string, rows: PredictionRow[]) {

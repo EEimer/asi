@@ -1,4 +1,4 @@
-import { Elysia, t } from 'elysia'
+import { Elysia, t, type Context } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { getAllSummaries, getSummariesPage, getSummariesCount, getSummaryById, getSummariesByVideoId, createSummary, updateSummaryMeta, updateSummaryDone, updateSummaryError, updateSummaryAuthor, updateSummaryLang, resetSummaryForRetry, deleteSummary, deleteAllSummaries, getSummarizedVideoIds, getSummaryChat, saveSummaryChat, clearSummaryChat } from './db/summaries'
 import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAllNotes } from './db/notes'
@@ -32,6 +32,11 @@ function emitEvent(event: ProcessingEvent) {
 
 function emitStep(summaryId: string, videoTitle: string, step: ProcessingEvent['step'], message: string) {
   emitEvent({ summaryId, videoTitle, step, message, timestamp: new Date().toISOString() })
+}
+
+function jsonError(set: Context['set'], message: string, status = 404) {
+  set.status = status
+  return { error: message }
 }
 
 const X_PROMPT = 'Fasse den folgenden Tweet-Inhalt kurz auf Deutsch zusammen. Falls nötig erkläre den Kontext. Kein Titel, keine Einleitung, direkt zur Sache. Maximal 3-4 Sätze.'
@@ -104,7 +109,7 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
   }
 }
 
-const app = new Elysia()
+new Elysia()
   .use(cors({ origin: true, allowedHeaders: ['Content-Type'], methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }))
 
   // SSE: Live processing events
@@ -153,7 +158,7 @@ const app = new Elysia()
   }) })
 
   // YouTube Feed (paginated)
-  .get('/api/youtube/feed', async ({ query }) => {
+  .get('/api/youtube/feed', async ({ query, set }) => {
     try {
       const offset = Number(query.offset) || 0
       const limit = Number(query.limit) || 30
@@ -174,7 +179,7 @@ const app = new Elysia()
       return { videos: filtered.map(v => ({ ...v, alreadySummarized: summarized.has(v.id), summaryId: summarized.get(v.id) ?? null })), total, hasMore }
     } catch (e: any) {
       const message = e?.message || 'YouTube-Feed konnte nicht geladen werden.'
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      return jsonError(set, message, 500)
     }
   }, { query: t.Object({ offset: t.Optional(t.String()), limit: t.Optional(t.String()), includeBlocked: t.Optional(t.String()) }) })
 
@@ -222,9 +227,9 @@ const app = new Elysia()
     return getSummariesByVideoId(params.videoId)
   })
 
-  .get('/api/summaries/:id', ({ params }) => {
+  .get('/api/summaries/:id', ({ params, set }) => {
     const summary = getSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
     return summary
   })
 
@@ -233,29 +238,29 @@ const app = new Elysia()
     return { ok: true }
   }, { body: t.Object({ author: t.String() }) })
 
-  .post('/api/summaries/:id/retry', ({ params }) => {
+  .post('/api/summaries/:id/retry', ({ params, set }) => {
     const summary = getSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
     const ok = resetSummaryForRetry(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Retry failed' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Retry failed', 400)
     emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
     processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '', undefined, summary.detail === 'short' ? 'short' : 'long')
     return { ok: true, id: summary.id, status: 'processing' }
   })
 
   // Nachfrage-Chat zu einer Zusammenfassung
-  .get('/api/summaries/:id/chat', ({ params }) => {
+  .get('/api/summaries/:id/chat', ({ params, set }) => {
     const summary = getSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
     return getSummaryChat(params.id)
   })
 
-  .post('/api/summaries/:id/chat', async ({ body, params }) => {
+  .post('/api/summaries/:id/chat', async ({ body, params, set }) => {
     const summary = getSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
 
     const question = body.question.trim()
-    if (!question) return new Response(JSON.stringify({ error: 'Frage ist leer' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    if (!question) return jsonError(set, 'Frage ist leer', 400)
 
     const model = body.model || summary.model || loadSettings().openaiModel
     const history = getSummaryChat(params.id)
@@ -282,28 +287,28 @@ const app = new Elysia()
     } catch (e: any) {
       const message = e?.message ?? 'Chat-Anfrage fehlgeschlagen'
       console.error(`[chat error] ${params.id}: ${message}`)
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      return jsonError(set, message, 500)
     }
   }, { body: t.Object({ question: t.String(), model: t.Optional(t.String()) }) })
 
-  .delete('/api/summaries/:id/chat', ({ params }) => {
+  .delete('/api/summaries/:id/chat', ({ params, set }) => {
     const summary = getSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
     clearSummaryChat(params.id)
     return { ok: true }
   })
 
-  .delete('/api/summaries/:id', ({ params }) => {
+  .delete('/api/summaries/:id', ({ params, set }) => {
     deletePredictionsBySummary(params.id)
     deleteTtsBySummary(params.id)
     const ok = deleteSummary(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   })
 
   .get('/api/tts/index', () => getTtsIndex())
 
-  .post('/api/tts/generate', async ({ body }) => {
+  .post('/api/tts/generate', async ({ body, set }) => {
     const summary = getSummaryById(body.summaryId)
     const label = summary?.videoTitle || body.summaryId
     const settings = loadSettings()
@@ -339,7 +344,7 @@ const app = new Elysia()
     } catch (e: any) {
       const message = e?.message ?? 'TTS-Fehler'
       emitStep(body.summaryId, label, 'tts_error', message)
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      return jsonError(set, message, 500)
     }
   }, {
     body: t.Object({
@@ -353,13 +358,11 @@ const app = new Elysia()
     }),
   })
 
-  .get('/api/tts/:summaryId/:variantKey', ({ params }) => {
+  .get('/api/tts/:summaryId/:variantKey', ({ params, set }) => {
     const summaryId = decodeURIComponent(params.summaryId)
     const variantKey = decodeURIComponent(params.variantKey)
     const filePath = resolveTtsFilePath(summaryId, variantKey)
-    if (!existsSync(filePath)) {
-      return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
-    }
+    if (!existsSync(filePath)) return jsonError(set, 'Not found')
     return new Response(Bun.file(filePath), {
       headers: {
         'Content-Type': 'audio/mpeg',
@@ -405,9 +408,9 @@ const app = new Elysia()
     videoTitle: t.Optional(t.String()),
   }) })
 
-  .delete('/api/predictions/:id', ({ params }) => {
+  .delete('/api/predictions/:id', ({ params, set }) => {
     const ok = deletePrediction(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   })
 
@@ -418,15 +421,15 @@ const app = new Elysia()
     return createCustomPrompt(body.title, body.text)
   }, { body: t.Object({ title: t.String(), text: t.String() }) })
 
-  .put('/api/custom-prompts/:id', ({ params, body }) => {
+  .put('/api/custom-prompts/:id', ({ params, body, set }) => {
     const ok = updateCustomPrompt(params.id, body.title, body.text)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   }, { body: t.Object({ title: t.String(), text: t.String() }) })
 
-  .delete('/api/custom-prompts/:id', ({ params }) => {
+  .delete('/api/custom-prompts/:id', ({ params, set }) => {
     const ok = deleteCustomPrompt(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   })
 
@@ -437,21 +440,21 @@ const app = new Elysia()
     return createNote(body.title ?? '', body.text ?? '', body.isTodo ?? true)
   }, { body: t.Object({ title: t.Optional(t.String()), text: t.Optional(t.String()), isTodo: t.Optional(t.Boolean()) }) })
 
-  .put('/api/notes/:id', ({ params, body }) => {
+  .put('/api/notes/:id', ({ params, body, set }) => {
     const ok = updateNote(params.id, body.title ?? '', body.text ?? '', body.isTodo ?? true)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   }, { body: t.Object({ title: t.Optional(t.String()), text: t.Optional(t.String()), isTodo: t.Optional(t.Boolean()) }) })
 
-  .put('/api/notes/:id/done', ({ params }) => {
+  .put('/api/notes/:id/done', ({ params, set }) => {
     const ok = markNoteDone(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   })
 
-  .delete('/api/notes/:id', ({ params }) => {
+  .delete('/api/notes/:id', ({ params, set }) => {
     const ok = deleteNote(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   })
 
@@ -491,9 +494,9 @@ const app = new Elysia()
     return { id, status: 'processing' }
   }, { body: t.Object({ tweetUrl: t.String() }) })
 
-  .post('/api/x/:id/retry', ({ params }) => {
+  .post('/api/x/:id/retry', ({ params, set }) => {
     const summary = getXSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
     resetXSummaryForRetry(params.id)
     const settings = loadSettings()
     emitStep(summary.id, summary.tweetUrl, 'queued', 'Retry gestartet...')
@@ -501,9 +504,9 @@ const app = new Elysia()
     return { ok: true, id: summary.id, status: 'processing' }
   })
 
-  .post('/api/x/:id/translate', async ({ params }) => {
+  .post('/api/x/:id/translate', async ({ params, set }) => {
     const summary = getXSummaryById(params.id)
-    if (!summary) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!summary) return jsonError(set, 'Not found')
     const settings = loadSettings()
     const content = await fetchXContent(summary.tweetUrl)
     const translation = await summarizeTranscript(
@@ -516,9 +519,9 @@ const app = new Elysia()
     return { translation }
   })
 
-  .delete('/api/x/:id', ({ params }) => {
+  .delete('/api/x/:id', ({ params, set }) => {
     const ok = deleteXSummary(params.id)
-    if (!ok) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
   })
 

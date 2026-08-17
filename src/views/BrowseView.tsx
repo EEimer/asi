@@ -1,15 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, generateTts, fetchTtsIndex, fetchCustomPrompts } from '../api/endpoints'
-import type { CustomPrompt } from '../api/endpoints'
-import type { SummaryDetail, TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
+import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, fetchCustomPrompts } from '../api/endpoints'
+import type { CustomPrompt, SummaryDetail, TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
 import { MODEL_OPTIONS, DEFAULT_SETTINGS, SUMMARY_DETAIL_LABELS } from '../../shared/types'
 import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, LinkIcon, Play, Send, Check, Wand2, Zap } from 'lucide-react'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SegmentedControl } from '../components/SegmentedControl'
-import { Button, buttonClasses } from '../components/ui/Button'
-import { Badge } from '../components/ui/Badge'
-import { useAudioPlayer } from '../store/audioPlayerStore'
+import { useTtsPlayback, type TtsTarget } from '../hooks/useTtsPlayback'
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
+import { POLL_INTERVAL_MS, appendUnique } from '../lib/constants'
+import { Badge, Button, Card, Input, buttonClasses, SkeletonList } from '../components/ui'
 
 const PAGE_SIZE = 30
 type PendingTtsMode = 'play' | 'telegram'
@@ -72,16 +72,10 @@ export default function BrowseView() {
   const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.openaiModel)
   const [channelFilterMode, setChannelFilterMode] = useState<'filtered' | 'all'>('filtered')
   const [blockedChannels, setBlockedChannels] = useState<string[]>([])
-  const [ttsDefaults, setTtsDefaults] = useState<{ model: TtsModel; voice: TtsVoice; instructions: string }>({
-    model: 'tts-1-hd',
-    voice: 'nova',
-    instructions: '',
-  })
-  const [ttsIndex, setTtsIndex] = useState<TtsIndex>({})
+  const tts = useTtsPlayback()
   const [pendingTtsByVideo, setPendingTtsByVideo] = useState<Record<string, PendingTtsMode>>({})
   const [runningTtsByVideo, setRunningTtsByVideo] = useState<Record<string, boolean>>({})
   const [ttsErrors, setTtsErrors] = useState<Record<string, string>>({})
-  const player = useAudioPlayer()
   const showAllChannels = channelFilterMode === 'all'
   const blockedKeys = new Set(blockedChannels.map(channelKey))
 
@@ -108,12 +102,7 @@ export default function BrowseView() {
       const offset = reset ? 0 : videosLenRef.current
       if (!reset) setLoadingMore(true)
       const data = await fetchYouTubeFeed(offset, PAGE_SIZE, showAllChannels)
-      setVideos(prev => {
-        if (reset) return data.videos
-        const existingIds = new Set(prev.map(v => v.id))
-        const newVideos = data.videos.filter(v => !existingIds.has(v.id))
-        return [...prev, ...newVideos]
-      })
+      setVideos(prev => (reset ? data.videos : appendUnique(prev, data.videos)))
       setHasMore(data.hasMore)
       setSummarized(prev => {
         const n = new Map(prev)
@@ -136,10 +125,8 @@ export default function BrowseView() {
   useEffect(() => { loadFeed(true) }, [loadFeed])
   useEffect(() => { refreshSummaryStatusMaps() }, [])
   useEffect(() => {
-    Promise.all([fetchSettings(), fetchTtsIndex()])
-      .then(([s, index]) => {
-        setTtsDefaults({ model: s.ttsModel, voice: s.ttsVoice, instructions: s.ttsInstructions })
-        setTtsIndex(index)
+    fetchSettings()
+      .then(s => {
         setDefaultModel(s.openaiModel)
         setSelectedModel(s.openaiModel)
         setBlockedChannels(s.blockedChannels)
@@ -162,26 +149,15 @@ export default function BrowseView() {
     try {
       const summary = await fetchSummary(summaryId)
       if (!summary.summary) throw new Error('Summary noch nicht verfügbar')
-      const result = await generateTts({
-        summaryId,
+      const target: TtsTarget = {
+        id: summaryId,
+        title: summary.videoTitle || video.title || 'Summary',
         text: summary.summary,
-        model: ttsDefaults.model,
-        voice: ttsDefaults.voice,
-        instructions: ttsDefaults.instructions,
-        sendToTelegram: mode === 'telegram',
-      })
-      try {
-        const index = await fetchTtsIndex()
-        setTtsIndex(index)
-      } catch {}
-      if (mode === 'play') {
-        await player.playTrack(result.audioUrl, {
-          summaryId: result.summaryId,
-          variantKey: result.variantKey,
-          title: summary.videoTitle || video.title || 'Summary',
-          durationHintSeconds: result.durationSeconds,
-        })
       }
+      /* Fehler werden hier zusätzlich nach Video-ID abgelegt — die Karte in der
+         Liste kennt die Summary-ID nicht, unter der der Hook sie führt. */
+      if (mode === 'telegram') await tts.sendToTelegram(target, tts.defaults)
+      else await tts.generateAndPlay(target, tts.defaults)
     } catch (e: any) {
       setTtsErrors(prev => ({ ...prev, [video.id]: e?.message ?? 'TTS fehlgeschlagen' }))
     } finally {
@@ -238,17 +214,15 @@ export default function BrowseView() {
     }
   }
 
-  // Infinite scroll via IntersectionObserver
-  useEffect(() => {
-    if (!hasMore || loadingMore) return
-    const sentinel = sentinelRef.current
-    if (!sentinel) return
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0]?.isIntersecting) loadFeed(false)
-    }, { rootMargin: '200px' })
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [hasMore, loadingMore, loadFeed])
+  const loadMore = useCallback(() => { loadFeed(false) }, [loadFeed])
+  useInfiniteScroll(sentinelRef, hasMore && !loadingMore, loadMore)
+
+  /* Der Poller laeuft in einem festen 3s-Takt. runTtsJob entsteht bei jedem Render
+     neu; als Dependency wuerde das Intervall staendig neu aufgesetzt und der Takt
+     nie erreicht. Die Ref haelt immer die aktuelle Fassung, ohne den Effekt zu
+     invalidieren. */
+  const runTtsJobRef = useRef(runTtsJob)
+  runTtsJobRef.current = runTtsJob
 
   // Poll summary status continuously so browse updates without manual refresh.
   useEffect(() => {
@@ -277,8 +251,7 @@ export default function BrowseView() {
         })
         setFailed(errorMap)
         try {
-          const index = await fetchTtsIndex()
-          setTtsIndex(index)
+          await tts.refreshIndex()
         } catch {}
 
         for (const [videoId, mode] of Object.entries(pendingTtsByVideo)) {
@@ -287,7 +260,7 @@ export default function BrowseView() {
           if (doneSummaryId) {
             const video = videos.find(item => item.id === videoId)
             if (video) {
-              void runTtsJob(video, doneSummaryId, mode)
+              void runTtsJobRef.current(video, doneSummaryId, mode)
             }
             continue
           }
@@ -301,9 +274,9 @@ export default function BrowseView() {
           }
         }
       } catch {}
-    }, 3000)
+    }, POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [videos.length, pendingTtsByVideo, runningTtsByVideo, videos])
+  }, [pendingTtsByVideo, runningTtsByVideo, videos])
 
   async function handleSummarize(video: YouTubeVideo, detail: SummaryDetail) {
     try {
@@ -470,11 +443,7 @@ export default function BrowseView() {
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
-          <p className="text-sm">YouTube Abo-Feed wird geladen...</p>
-          <p className="text-xs text-dim mt-1">Das kann beim ersten Mal etwas dauern</p>
-        </div>
+        <SkeletonList count={5} />
       ) : error ? (
         <div className="flex flex-col items-center justify-center py-16">
           <AlertCircle className="w-10 h-10 text-danger mb-3" />
@@ -497,14 +466,13 @@ export default function BrowseView() {
               const isFailed = !doneId && !processingId && !!failedId
               const doneDetail = doneId ? detailById.get(doneId) : undefined
               const processingDetail = processingId ? detailById.get(processingId) : undefined
-              const hasTts = !!(doneId && ttsIndex[doneId] && Object.keys(ttsIndex[doneId].variants).length > 0)
+              const hasTts = !!(doneId && tts.index[doneId] && Object.keys(tts.index[doneId].variants).length > 0)
               const cardClickable = !!summaryId
               const isBlocked = channelKeysOf(v).some(k => blockedKeys.has(k))
               return (
-                <div
-                  key={v.id}
+                <Card
                   onClick={cardClickable && summaryId ? () => navigate(`/summaries/${summaryId}`) : undefined}
-                  className={`card-elevation bg-panel border border-surfaceBorder rounded-xl overflow-hidden card-interactive ${cardClickable ? 'cursor-pointer' : ''}`}
+                  className={`overflow-hidden p-0 card-interactive ${cardClickable ? 'cursor-pointer' : ''}`}
                 >
                   <div className="flex gap-4 p-4">
                     <div className="relative shrink-0">
@@ -610,7 +578,7 @@ export default function BrowseView() {
                       {ttsErrors[v.id] ? <span className="text-[10px] text-danger text-right">{ttsErrors[v.id]}</span> : null}
                     </div>
                   </div>
-                </div>
+                </Card>
               )
             })}
           </div>
@@ -631,7 +599,7 @@ export default function BrowseView() {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-muted mb-1.5">YouTube URL</label>
-            <input
+            <Input
               type="text"
               placeholder="https://www.youtube.com/watch?v=..."
               value={customPromptUrl}
@@ -644,7 +612,7 @@ export default function BrowseView() {
                   setCustomPromptUrl(text)
                 }
               }}
-              className="w-full px-3 py-2.5 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-accent/40"
+              
             />
           </div>
           <div>
@@ -709,7 +677,7 @@ export default function BrowseView() {
 
       <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
         <p className="text-sm text-muted mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
-        <input
+        <Input
           type="text"
           placeholder="https://www.youtube.com/watch?v=..."
           value={manualUrl}
@@ -723,7 +691,7 @@ export default function BrowseView() {
               setManualUrl(text)
             }
           }}
-          className="w-full px-3 py-2.5 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-accent/40"
+          
         />
         <div className="flex items-center justify-between gap-3 mt-3">
           <span className="text-xs text-muted">{manualDetail === 'short' ? 'Nur die 2-3 Kernaussagen' : 'Ausführlich mit allen Details'}</span>

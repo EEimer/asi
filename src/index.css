@@ -126,6 +126,17 @@
   border-color: rgb(var(--primary) / 0.4);
 }
 
+/* Chevron des <Select>. Als CSS-Regel und nicht als Tailwind-Klasse, weil die
+   Pfeilfarbe aus einer Theme-Variable kommen muss: ein data-URI im Tailwind-Wert
+   kann kein var() aufloesen, das Betriebssystem-Chevron waere im Dark unsichtbar.
+   currentColor geht in einem background-image nicht, daher zwei feste Toene. */
+.select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236B7690' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+}
+html.dark .select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23737B90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+}
+
 /* Zeilen in Listen und Tabellen: nur die Fläche, und die halbe Deckkraft. Eine Zeile
    steht direkt neben ihren Nachbarn – auf voller Stärke wandert das Auge bei jeder
    Mausbewegung mit. */
@@ -231,3 +242,130 @@ html.dark .prose h4, html.dark .prose strong { color: rgb(var(--text)); }
   50% { opacity: 0.5; }
 }
 .animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+
+/* --- Lade- und Übergangs-Bausteine (aus ../wealth) ------------------------- */
+
+/* Schimmer für Lade-Skelette. Der Verlauf wandert sehr langsam durch: bei 3s wirkt
+   der 1000px-Weg wie ein Flackern, nicht wie Laden. */
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg,
+    rgb(var(--input-bg)) 0%, rgb(var(--input-bg)) 40%,
+    rgb(var(--row-hover) / 0.55) 50%,
+    rgb(var(--input-bg)) 60%, rgb(var(--input-bg)) 100%);
+  background-size: 1000px 100%;
+  animation: shimmer 32s linear infinite;
+  position: relative;
+  overflow: hidden;
+}
+html.dark .skeleton-shimmer {
+  background: linear-gradient(90deg,
+    #1c1f28 0%, #1c1f28 40%, #242835 50%, #1c1f28 60%, #1c1f28 100%);
+  background-size: 1000px 100%;
+}
+
+/* Neu eingetroffener Eintrag: einmal kurz aufleuchten statt ihn stumm einzufügen. */
+@keyframes highlight {
+  0%   { background-color: transparent; }
+  50%  { background-color: rgb(var(--primary) / 0.15); }
+  100% { background-color: transparent; }
+}
+.animate-highlight { animation: highlight 0.6s ease-in-out; }
+
+/* Ladebalken ohne bekannten Fortschritt: ein Segment laeuft durch die Spur.
+   Traeger braucht position: relative und overflow-hidden. */
+@keyframes progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.progress-indeterminate::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 25%;
+  border-radius: inherit;
+  background: rgb(var(--primary));
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+/* Sichere Bereiche auf Geraeten mit Notch – fuer Kopf- und Fussleisten. */
+.safe-area-inset-top { padding-top: env(safe-area-inset-top, 0px); }
+.safe-area-inset-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* --- Magic Border: die KI-Optik --------------------------------------------
+   Wiederverwendbarer animierter Gradient-Rahmen fuer Vorgaenge, die ein Modell
+   ausfuehrt. Als inset ::before-Ring (nicht via padding), damit die Aussenkante
+   exakt der Control-Hoehe entspricht und mit Input/Select fluchtet. */
+:root {
+  --magic-stop-0: #a855f7;
+  --magic-stop-25: #3b82f6;
+  --magic-stop-50: #ec4899;
+  --magic-stop-75: #f59e0b;
+  --magic-stop-100: #a855f7;
+}
+
+@keyframes gradient-rotate {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.magic-border {
+  position: relative;
+  border-radius: var(--radius);
+  background: transparent;
+  transition: box-shadow 0.3s ease;
+}
+.magic-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(90deg, var(--magic-stop-0) 0%, var(--magic-stop-25) 25%, var(--magic-stop-50) 50%, var(--magic-stop-75) 75%, var(--magic-stop-100) 100%);
+  background-size: 200% 200%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.magic-border:hover {
+  box-shadow: 0 10px 25px -5px rgb(168 85 247 / 0.3), 0 8px 10px -6px rgb(168 85 247 / 0.3);
+}
+.magic-border-active {
+  box-shadow: 0 10px 25px -5px rgb(168 85 247 / 0.5), 0 8px 10px -6px rgb(168 85 247 / 0.5);
+}
+.magic-border-content {
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--panel));
+}
+.magic-border:hover .magic-border-content,
+.magic-border-active .magic-border-content {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--magic-stop-0), rgb(var(--panel)) 82%) 0%,
+    color-mix(in srgb, var(--magic-stop-25), rgb(var(--panel)) 82%) 25%,
+    color-mix(in srgb, var(--magic-stop-50), rgb(var(--panel)) 82%) 50%,
+    color-mix(in srgb, var(--magic-stop-75), rgb(var(--panel)) 82%) 75%,
+    color-mix(in srgb, var(--magic-stop-100), rgb(var(--panel)) 82%) 100%);
+  background-size: 200% 200%;
+  animation: gradient-rotate 3s ease infinite;
+}
+.magic-border-active .magic-border-content { animation-duration: 1.5s; }
+
+/* Schrift im Verlauf – fuer Labels auf Magic-Buttons. */
+.magic-text {
+  background: linear-gradient(90deg, var(--magic-stop-0) 0%, var(--magic-stop-25) 25%, var(--magic-stop-50) 50%, var(--magic-stop-75) 75%, var(--magic-stop-100) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}

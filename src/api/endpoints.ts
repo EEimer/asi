@@ -1,271 +1,161 @@
-import type { YouTubeVideo, SummaryListItem, Summary, SummaryDetail, Settings, Note, Prediction, ChatMessage, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
-
-export interface CustomPrompt {
-  id: string
-  title: string
-  text: string
-  createdAt: string
-  updatedAt: string
-}
+import type { YouTubeVideo, SummaryListItem, Summary, SummaryDetail, Settings, Note, Prediction, ChatMessage, CustomPrompt, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
 
 const BASE = '/api'
 
-export async function fetchYouTubeFeed(offset = 0, limit = 30, includeBlocked = false): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
-  const res = await fetch(`${BASE}/youtube/feed?offset=${offset}&limit=${limit}&includeBlocked=${includeBlocked ? '1' : '0'}`)
-  if (!res.ok) {
-    const text = await res.text()
-    try {
-      const json = JSON.parse(text)
-      throw new Error(json.error ?? `Feed error: ${res.status}`)
-    } catch {
-      throw new Error(`Feed error: ${res.status}`)
-    }
-  }
-  return res.json()
-}
-
-export async function refreshYouTubeFeed(): Promise<void> {
-  const res = await fetch(`${BASE}/youtube/feed/refresh`, { method: 'POST' })
-  if (!res.ok) {
-    const text = await res.text()
-    try {
-      const json = JSON.parse(text)
-      throw new Error(json.error ?? `Refresh error: ${res.status}`)
-    } catch {
-      throw new Error(`Refresh error: ${res.status}`)
-    }
+/* Server-Fehler kommen als { error: string }. Der Parse liegt bewusst ausserhalb
+   des throw-Pfads: steht der throw im try, faengt ihn das eigene catch wieder ein
+   und ersetzt die Server-Meldung durch den generischen Fallback. */
+async function errorMessage(res: Response, label: string): Promise<string> {
+  const fallback = `${label} error: ${res.status}`
+  try {
+    const json = JSON.parse(await res.text())
+    return typeof json?.error === 'string' ? json.error : fallback
+  } catch {
+    return fallback
   }
 }
 
-export async function fetchSummaries(): Promise<SummaryListItem[]> {
-  const res = await fetch(`${BASE}/summaries`)
-  if (!res.ok) throw new Error(`Summaries error: ${res.status}`)
-  return res.json()
+type RequestInitJson = RequestInit & { json?: unknown }
+
+/* Kein try um den throw herum — sonst verschluckt das catch die Server-Meldung. */
+async function send(path: string, init: RequestInitJson, label: string): Promise<Response> {
+  const { json, ...rest } = init
+  if (json !== undefined) {
+    const headers = new Headers(rest.headers)
+    headers.set('Content-Type', 'application/json')
+    rest.headers = headers
+    rest.body = JSON.stringify(json)
+  }
+  const res = await fetch(`${BASE}${path}`, rest)
+  if (!res.ok) throw new Error(await errorMessage(res, label))
+  return res
 }
 
-export async function fetchSummariesPaged(offset = 0, limit = 20): Promise<{ items: SummaryListItem[]; total: number; hasMore: boolean }> {
-  const res = await fetch(`${BASE}/summaries/paged?offset=${offset}&limit=${limit}`)
-  if (!res.ok) throw new Error(`Summaries paged error: ${res.status}`)
-  return res.json()
+async function request<T>(path: string, init: RequestInitJson = {}, label = 'Request'): Promise<T> {
+  const res = await send(path, init, label)
+  return res.json() as Promise<T>
 }
 
-export async function fetchSummary(id: string): Promise<Summary> {
-  const res = await fetch(`${BASE}/summaries/${id}`)
-  if (!res.ok) throw new Error(`Summary error: ${res.status}`)
-  return res.json()
+/* Fuer Routen, deren Body niemand liest: res.json() wuerde bei leerer Antwort werfen. */
+async function requestVoid(path: string, init: RequestInitJson = {}, label = 'Request'): Promise<void> {
+  await send(path, init, label)
 }
 
-export async function createSummary(
+export const fetchYouTubeFeed = (offset = 0, limit = 30, includeBlocked = false) =>
+  request<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }>(`/youtube/feed?offset=${offset}&limit=${limit}&includeBlocked=${includeBlocked ? '1' : '0'}`, {}, 'Feed')
+
+export const refreshYouTubeFeed = () =>
+  requestVoid('/youtube/feed/refresh', { method: 'POST' }, 'Refresh')
+
+export const fetchSummaries = () =>
+  request<SummaryListItem[]>('/summaries', {}, 'Summaries')
+
+export const fetchSummariesPaged = (offset = 0, limit = 20) =>
+  request<{ items: SummaryListItem[]; total: number; hasMore: boolean }>(`/summaries/paged?offset=${offset}&limit=${limit}`, {}, 'Summaries paged')
+
+export const fetchSummary = (id: string) =>
+  request<Summary>(`/summaries/${id}`, {}, 'Summary')
+
+export const createSummary = (
   videoUrl: string,
   meta?: { title?: string; channel?: string; thumbnail?: string },
   lang?: string,
   model?: string,
   customPrompt?: string,
   detail?: SummaryDetail,
-): Promise<{ id: string; status: string }> {
-  const res = await fetch(`${BASE}/summaries`, {
+) =>
+  request<{ id: string; status: string }>('/summaries', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model, customPrompt, detail }),
-  })
-  if (!res.ok) throw new Error(`Create error: ${res.status}`)
-  return res.json()
-}
+    json: { videoUrl, videoTitle: meta?.title, channelName: meta?.channel, thumbnailUrl: meta?.thumbnail, lang, model, customPrompt, detail },
+  }, 'Create')
 
-export async function fetchVideoSummaries(videoId: string): Promise<SummaryListItem[]> {
-  const res = await fetch(`${BASE}/videos/${videoId}/summaries`)
-  if (!res.ok) throw new Error(`Video summaries error: ${res.status}`)
-  return res.json()
-}
+export const fetchVideoSummaries = (videoId: string) =>
+  request<SummaryListItem[]>(`/videos/${videoId}/summaries`, {}, 'Video summaries')
 
-export async function retrySummary(id: string): Promise<{ ok: boolean; id: string; status: string }> {
-  const res = await fetch(`${BASE}/summaries/${id}/retry`, { method: 'POST' })
-  if (!res.ok) throw new Error(`Retry error: ${res.status}`)
-  return res.json()
-}
+export const retrySummary = (id: string) =>
+  request<{ ok: boolean; id: string; status: string }>(`/summaries/${id}/retry`, { method: 'POST' }, 'Retry')
 
-export async function updateAuthor(id: string, author: string): Promise<void> {
-  const res = await fetch(`${BASE}/summaries/${id}/author`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ author }),
-  })
-  if (!res.ok) throw new Error(`Update author error: ${res.status}`)
-}
+export const updateAuthor = (id: string, author: string) =>
+  requestVoid(`/summaries/${id}/author`, { method: 'PUT', json: { author } }, 'Update author')
 
-export async function deleteSummary(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/summaries/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Delete error: ${res.status}`)
-}
+export const deleteSummary = (id: string) =>
+  requestVoid(`/summaries/${id}`, { method: 'DELETE' }, 'Delete')
 
-export async function fetchSummaryChat(id: string): Promise<ChatMessage[]> {
-  const res = await fetch(`${BASE}/summaries/${id}/chat`)
-  if (!res.ok) throw new Error(`Chat error: ${res.status}`)
-  return res.json()
-}
+export const fetchSummaryChat = (id: string) =>
+  request<ChatMessage[]>(`/summaries/${id}/chat`, {}, 'Chat')
 
-export async function sendSummaryChatMessage(id: string, question: string, model: string): Promise<ChatMessage[]> {
-  const res = await fetch(`${BASE}/summaries/${id}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, model }),
-  })
-  if (!res.ok) {
-    // Provider-Fehler (Rate Limit, Context zu lang) steckt im Body — ohne ihn
-    // stünde im UI nur eine nackte Statuszahl.
-    const text = await res.text()
-    try {
-      const json = JSON.parse(text)
-      throw new Error(json.error ?? `Chat error: ${res.status}`)
-    } catch (e: any) {
-      throw new Error(e?.message ?? `Chat error: ${res.status}`)
-    }
-  }
-  return res.json()
-}
+export const sendSummaryChatMessage = (id: string, question: string, model: string) =>
+  request<ChatMessage[]>(`/summaries/${id}/chat`, { method: 'POST', json: { question, model } }, 'Chat')
 
-export async function resetSummaryChat(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/summaries/${id}/chat`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Chat reset error: ${res.status}`)
-}
+export const resetSummaryChat = (id: string) =>
+  requestVoid(`/summaries/${id}/chat`, { method: 'DELETE' }, 'Chat reset')
 
-export async function fetchSettings(): Promise<Settings> {
-  const res = await fetch(`${BASE}/settings`)
-  if (!res.ok) throw new Error(`Settings error: ${res.status}`)
-  return res.json()
-}
+export const fetchSettings = () =>
+  request<Settings>('/settings', {}, 'Settings')
 
-export async function updateSettings(settings: Partial<Settings>): Promise<void> {
-  const res = await fetch(`${BASE}/settings`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(settings),
-  })
-  if (!res.ok) throw new Error(`Settings update error: ${res.status}`)
-}
+export const updateSettings = (settings: Partial<Settings>) =>
+  requestVoid('/settings', { method: 'PUT', json: settings }, 'Settings update')
 
-export async function fetchCustomPrompts(): Promise<CustomPrompt[]> {
-  const res = await fetch(`${BASE}/custom-prompts`)
-  if (!res.ok) throw new Error(`Custom prompts error: ${res.status}`)
-  return res.json()
-}
+export const fetchCustomPrompts = () =>
+  request<CustomPrompt[]>('/custom-prompts', {}, 'Custom prompts')
 
-export async function createCustomPromptApi(title: string, text: string): Promise<CustomPrompt> {
-  const res = await fetch(`${BASE}/custom-prompts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, text }),
-  })
-  if (!res.ok) throw new Error(`Create custom prompt error: ${res.status}`)
-  return res.json()
-}
+export const createCustomPromptApi = (title: string, text: string) =>
+  request<CustomPrompt>('/custom-prompts', { method: 'POST', json: { title, text } }, 'Create custom prompt')
 
-export async function updateCustomPromptApi(id: string, title: string, text: string): Promise<void> {
-  const res = await fetch(`${BASE}/custom-prompts/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, text }),
-  })
-  if (!res.ok) throw new Error(`Update custom prompt error: ${res.status}`)
-}
+export const updateCustomPromptApi = (id: string, title: string, text: string) =>
+  requestVoid(`/custom-prompts/${id}`, { method: 'PUT', json: { title, text } }, 'Update custom prompt')
 
-export async function deleteCustomPromptApi(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/custom-prompts/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Delete custom prompt error: ${res.status}`)
-}
+export const deleteCustomPromptApi = (id: string) =>
+  requestVoid(`/custom-prompts/${id}`, { method: 'DELETE' }, 'Delete custom prompt')
 
-export async function fetchNotes(): Promise<Note[]> {
-  const res = await fetch(`${BASE}/notes`)
-  if (!res.ok) throw new Error(`Notes error: ${res.status}`)
-  return res.json()
-}
+export const fetchNotes = () =>
+  request<Note[]>('/notes', {}, 'Notes')
 
-export async function createNoteApi(title: string, text: string, isTodo: boolean): Promise<Note> {
-  const res = await fetch(`${BASE}/notes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, text, isTodo }),
-  })
-  if (!res.ok) throw new Error(`Create note error: ${res.status}`)
-  return res.json()
-}
+export const createNoteApi = (title: string, text: string, isTodo: boolean) =>
+  request<Note>('/notes', { method: 'POST', json: { title, text, isTodo } }, 'Create note')
 
-export async function updateNoteApi(id: string, title: string, text: string, isTodo: boolean): Promise<void> {
-  const res = await fetch(`${BASE}/notes/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, text, isTodo }),
-  })
-  if (!res.ok) throw new Error(`Update note error: ${res.status}`)
-}
+export const updateNoteApi = (id: string, title: string, text: string, isTodo: boolean) =>
+  requestVoid(`/notes/${id}`, { method: 'PUT', json: { title, text, isTodo } }, 'Update note')
 
-export async function markNoteDoneApi(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/notes/${id}/done`, { method: 'PUT' })
-  if (!res.ok) throw new Error(`Done note error: ${res.status}`)
-}
+export const markNoteDoneApi = (id: string) =>
+  requestVoid(`/notes/${id}/done`, { method: 'PUT' }, 'Done note')
 
-export async function deleteNoteApi(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/notes/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Delete note error: ${res.status}`)
-}
+export const deleteNoteApi = (id: string) =>
+  requestVoid(`/notes/${id}`, { method: 'DELETE' }, 'Delete note')
 
-export async function addPredictions(payload: {
+export const addPredictions = (payload: {
   summaryId: string
   videoTitle: string
   videoUrl: string
   channelName: string
   author: string
   predictions: { name: string; direction: string; if_cases: string; price_target: string }[]
-}): Promise<{ ok: boolean; added: number }> {
-  const res = await fetch(`${BASE}/predictions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`Add predictions error: ${res.status}`)
-  return res.json()
-}
+}) =>
+  request<{ ok: boolean; added: number }>('/predictions', { method: 'POST', json: payload }, 'Add predictions')
 
-export async function fetchPredictions(): Promise<Prediction[]> {
-  const res = await fetch(`${BASE}/predictions`)
-  if (!res.ok) throw new Error(`Predictions error: ${res.status}`)
-  return res.json()
-}
+export const fetchPredictions = () =>
+  request<Prediction[]>('/predictions', {}, 'Predictions')
 
-export async function addManualPrediction(payload: {
+export const addManualPrediction = (payload: {
   asset: string
   direction: string
   ifCases?: string
   priceTarget?: string
   author?: string
   videoTitle?: string
-}): Promise<{ ok: boolean; id: string }> {
-  const res = await fetch(`${BASE}/predictions/manual`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`Manual prediction error: ${res.status}`)
-  return res.json()
-}
+}) =>
+  request<{ ok: boolean; id: string }>('/predictions/manual', { method: 'POST', json: payload }, 'Manual prediction')
 
-export async function deletePrediction(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/predictions/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Delete prediction error: ${res.status}`)
-}
+export const deletePrediction = (id: string) =>
+  requestVoid(`/predictions/${id}`, { method: 'DELETE' }, 'Delete prediction')
 
-export async function resetTable(table: 'summaries' | 'notes' | 'predictions' | 'settings'): Promise<void> {
-  const res = await fetch(`${BASE}/reset/${table}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Reset error: ${res.status}`)
-}
+export const resetTable = (table: 'summaries' | 'notes' | 'predictions' | 'settings') =>
+  requestVoid(`/reset/${table}`, { method: 'DELETE' }, 'Reset')
 
-export async function fetchTtsIndex(): Promise<TtsIndex> {
-  const res = await fetch(`${BASE}/tts/index`)
-  if (!res.ok) throw new Error(`TTS index error: ${res.status}`)
-  return res.json()
-}
+export const fetchTtsIndex = () =>
+  request<TtsIndex>('/tts/index', {}, 'TTS index')
 
-export async function generateTts(payload: {
+export const generateTts = (payload: {
   summaryId: string
   text: string
   model?: TtsModel
@@ -273,50 +163,26 @@ export async function generateTts(payload: {
   instructions?: string
   forceRegenerate?: boolean
   sendToTelegram?: boolean
-}): Promise<TtsGenerateResponse> {
-  const res = await fetch(`${BASE}/tts/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`TTS generate error: ${res.status}`)
-  return res.json()
-}
+}) =>
+  request<TtsGenerateResponse>('/tts/generate', { method: 'POST', json: payload }, 'TTS generate')
 
 export function getTtsAudioUrl(summaryId: string, variantKey: string): string {
   return `${BASE}/tts/${encodeURIComponent(summaryId)}/${encodeURIComponent(variantKey)}`
 }
 
-export async function fetchXSummaries(): Promise<XSummary[]> {
-  const res = await fetch(`${BASE}/x`)
-  if (!res.ok) throw new Error(`X summaries error: ${res.status}`)
-  return res.json()
-}
+export const fetchXSummaries = () =>
+  request<XSummary[]>('/x', {}, 'X summaries')
 
-export async function createXSummaryApi(tweetUrl: string): Promise<{ id: string; status: string }> {
-  const res = await fetch(`${BASE}/x`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tweetUrl }),
-  })
-  if (!res.ok) throw new Error(`Create X summary error: ${res.status}`)
-  return res.json()
-}
+export const createXSummaryApi = (tweetUrl: string) =>
+  request<{ id: string; status: string }>('/x', { method: 'POST', json: { tweetUrl } }, 'Create X summary')
 
-export async function retryXSummary(id: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${BASE}/x/${id}/retry`, { method: 'POST' })
-  if (!res.ok) throw new Error(`Retry X summary error: ${res.status}`)
-  return res.json()
-}
+export const retryXSummary = (id: string) =>
+  request<{ ok: boolean }>(`/x/${id}/retry`, { method: 'POST' }, 'Retry X summary')
 
-export async function deleteXSummaryApi(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/x/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`Delete X summary error: ${res.status}`)
-}
+export const deleteXSummaryApi = (id: string) =>
+  requestVoid(`/x/${id}`, { method: 'DELETE' }, 'Delete X summary')
 
-export async function translateXSummary(id: string): Promise<string> {
-  const res = await fetch(`${BASE}/x/${id}/translate`, { method: 'POST' })
-  if (!res.ok) throw new Error(`Translate error: ${res.status}`)
-  const data = await res.json() as { translation: string }
+export const translateXSummary = async (id: string): Promise<string> => {
+  const data = await request<{ translation: string }>(`/x/${id}/translate`, { method: 'POST' }, 'Translate')
   return data.translation
 }

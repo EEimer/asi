@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { createXSummaryApi, deleteXSummaryApi, fetchXSummaries, retryXSummary, translateXSummary } from '../api/endpoints'
 import type { XSummary } from '../../shared/types'
 import { Loader2, Trash2, ExternalLink, Sparkles, AlertCircle, RotateCcw, Languages } from 'lucide-react'
-import { Button } from '../components/ui/Button'
-import { Badge } from '../components/ui/Badge'
+import { Badge, Button, Card, Input } from '../components/ui'
+import { POLL_INTERVAL_MS } from '../lib/constants'
 
 const STATUS_BADGE: Record<string, { variant: 'success' | 'primary' | 'danger'; label: string }> = {
   done: { variant: 'success', label: 'Fertig' },
@@ -38,14 +38,19 @@ export default function XView() {
 
   useEffect(() => { loadItems() }, [])
 
+  const hasProcessing = items.some(s => s.status === 'processing')
+
   useEffect(() => {
-    const hasProcessing = items.some(s => s.status === 'processing')
     if (!hasProcessing) return
     const timer = setInterval(async () => {
-      setItems(await fetchXSummaries().catch(() => []))
-    }, 3000)
+      /* Nur bei Erfolg übernehmen: ein Fehlschlag hier würde sonst die ganze
+         Liste leeren, womit hasProcessing false wird und nie wieder gepollt. */
+      try {
+        setItems(await fetchXSummaries())
+      } catch { /* letzte bekannte Liste behalten */ }
+    }, POLL_INTERVAL_MS)
     return () => clearInterval(timer)
-  }, [items])
+  }, [hasProcessing])
 
   async function handleSubmit() {
     const trimmed = url.trim()
@@ -104,9 +109,9 @@ export default function XView() {
     <div>
       <h2 className="text-lg font-semibold text-content mb-4">X Zusammenfassen</h2>
 
-      <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-4 mb-6">
+      <Card className="p-4 mb-6">
         <div className="flex gap-2">
-          <input
+          <Input
             ref={inputRef}
             type="text"
             value={url}
@@ -117,14 +122,14 @@ export default function XView() {
             }}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmit() }}
             placeholder="https://x.com/i/status/..."
-            className="flex-1 px-3 py-2.5 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="flex-1"
           />
           <Button onClick={handleSubmit} disabled={submitting || !url.trim()} loading={submitting}>
             <Sparkles className="w-4 h-4" /> Zusammenfassen
           </Button>
         </div>
         {error && <p className="text-xs text-danger mt-2 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{error}</p>}
-      </div>
+      </Card>
 
       {loading ? (
         <div className="flex items-center justify-center py-12 text-dim">
@@ -137,7 +142,7 @@ export default function XView() {
           {items.map(item => {
             const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.error
             return (
-              <div key={item.id} className="card-elevation bg-panel border border-surfaceBorder rounded-xl p-4">
+              <Card key={item.id}>
                 <div className="flex items-start gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -154,7 +159,7 @@ export default function XView() {
                       </a>
                     </div>
                     {item.summary && (
-                      <p className="text-sm text-content leading-relaxed">{item.summary}</p>
+                      <p className="text-sm text-content/70 leading-relaxed">{item.summary}</p>
                     )}
                     {item.status === 'done' && (
                       <button
@@ -174,7 +179,7 @@ export default function XView() {
                     )}
                     {translations[item.id] && (
                       <div className="mt-3 pt-3 border-t border-surfaceBorder">
-                        <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{translations[item.id]}</p>
+                        <p className="text-sm text-content/70 leading-relaxed whitespace-pre-wrap">{translations[item.id]}</p>
                       </div>
                     )}
                     {item.status === 'error' && item.errorMessage && (
@@ -211,7 +216,7 @@ export default function XView() {
                     </Button>
                   </div>
                 </div>
-              </div>
+              </Card>
             )
           })}
         </div>

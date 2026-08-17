@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { ChevronUp, ChevronDown, Terminal, Loader2, Check, AlertCircle, Sparkles, FileText, Download, Volume2 } from 'lucide-react'
 import type { ProcessingEvent, ProcessingStep } from '../../shared/types'
 import { useToast } from '../store/toastStore'
+import { Card } from './ui'
 
 const stepIcons: Record<ProcessingStep, typeof Check> = {
   queued: Download,
@@ -32,7 +33,8 @@ const stepColors: Record<ProcessingStep, string> = {
 export default function ProcessingConsole() {
   const [open, setOpen] = useState(false)
   const [events, setEvents] = useState<ProcessingEvent[]>([])
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  // Nur der Setter wird gebraucht: abgeschlossene Jobs werden einmalig entfernt.
+  const [, setDismissed] = useState<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
   const { addToast } = useToast()
   const toastedRef = useRef(new Set<string>())
@@ -41,6 +43,9 @@ export default function ProcessingConsole() {
   useEffect(() => {
     let es: EventSource | null = null
     let retryTimer: ReturnType<typeof setTimeout>
+    // Die Ref beim Betreten festhalten: beim Aufräumen zeigt dismissTimers.current
+    // womöglich schon auf eine andere Map, dann bliebe hier ein Timer stehen.
+    const timers = dismissTimers.current
 
     function connect() {
       es = new EventSource('/api/events')
@@ -77,7 +82,7 @@ export default function ProcessingConsole() {
     return () => {
       es?.close()
       clearTimeout(retryTimer)
-      for (const t of dismissTimers.current.values()) clearTimeout(t)
+      for (const t of timers.values()) clearTimeout(t)
     }
   }, [addToast])
 
@@ -95,7 +100,7 @@ export default function ProcessingConsole() {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-30">
       <div className="mx-auto max-w-7xl px-4">
-        <div className="card-elevation bg-panel border border-b-0 border-surfaceBorder rounded-t-xl overflow-hidden">
+        <Card className="border-b-0 rounded-t-xl overflow-hidden">
           <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-rowHover transition-colors">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-dim" />
@@ -123,7 +128,7 @@ export default function ProcessingConsole() {
               })}
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   )

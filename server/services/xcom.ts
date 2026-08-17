@@ -1,18 +1,6 @@
-import { existsSync } from 'fs'
+import { YT_DLP, runYtDlp } from './ytdlp'
 
-const YT_DLP = (() => {
-  const candidates = [
-    process.env.YT_DLP_PATH,
-    `${process.env.HOME}/Library/Python/3.14/bin/yt-dlp`,
-    `${process.env.HOME}/Library/Python/3.13/bin/yt-dlp`,
-    '/opt/homebrew/bin/yt-dlp',
-    '/usr/local/bin/yt-dlp',
-  ].filter(Boolean) as string[]
-  for (const p of candidates) {
-    if (existsSync(p)) return p
-  }
-  return 'yt-dlp'
-})()
+const XCOM_TIMEOUT_MS = 20_000
 
 export function isXUrl(url: string): boolean {
   return /https?:\/\/(www\.)?(x\.com|twitter\.com)/.test(url)
@@ -65,14 +53,18 @@ async function fetchViaOembed(url: string): Promise<OembedResult | null> {
 }
 
 async function fetchViaYtDlp(url: string): Promise<{ description: string; uploader: string; thumbnail: string } | null> {
-  const proc = Bun.spawn(
-    [YT_DLP, '--dump-json', '--skip-download', '--no-playlist', url],
-    { stdout: 'pipe', stderr: 'pipe' },
-  )
-  const killTimer = setTimeout(() => proc.kill(), 20_000)
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-  clearTimeout(killTimer)
+  /* Vorher: roher Spawn mit kill-Timer, der stderr nie leert. Ein kill reicht
+     hier nicht (siehe Kommentar in ytdlp.ts), und eine volle stderr-Pipe lässt
+     yt-dlp blockieren, bevor der Timer überhaupt greift. */
+  let stdout: string
+  try {
+    const res = await runYtDlp(
+      [YT_DLP, '--dump-json', '--skip-download', '--no-playlist', url],
+      XCOM_TIMEOUT_MS,
+    )
+    stdout = res.stdout
+  } catch { return null }
+
   try {
     const j = JSON.parse(stdout.trim())
     return {

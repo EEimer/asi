@@ -27,7 +27,8 @@ export default function App() {
       <header className="app-header border-b border-surfaceBorder bg-panel sticky top-0 z-20">
         <div className="mx-auto max-w-7xl px-4 flex items-center gap-6 h-14">
           <div className="flex items-center gap-2 mr-4">
-            <Youtube className="w-6 h-6 text-red-600" />
+            {/* Markenrot von YouTube, kein Theme-Ton – bleibt in beiden Themes gleich. */}
+            <Youtube className="w-6 h-6 text-[rgb(255,0,0)]" />
             <div className="leading-none">
               <span className="text-base font-bold text-content tracking-tight">YouTube</span>
               <span className="block text-[10px] font-medium text-dim tracking-wide uppercase">Assistent</span>

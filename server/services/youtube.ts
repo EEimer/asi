@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import type { YouTubeVideo } from '../../shared/types'
 import { loadSettings } from '../config'
+import { YT_DLP, runYtDlp } from './ytdlp'
 
 const COOKIE_BROWSER_PATHS: Record<string, string[]> = {
   chrome: [
@@ -39,20 +40,6 @@ function resolveCookieBrowser(): string | null {
   return null
 }
 
-const YT_DLP = (() => {
-  const candidates = [
-    process.env.YT_DLP_PATH,
-    `${process.env.HOME}/Library/Python/3.14/bin/yt-dlp`,
-    `${process.env.HOME}/Library/Python/3.13/bin/yt-dlp`,
-    '/opt/homebrew/bin/yt-dlp',
-    '/usr/local/bin/yt-dlp',
-  ].filter(Boolean) as string[]
-  for (const p of candidates) {
-    if (existsSync(p)) return p
-  }
-  return 'yt-dlp'
-})()
-
 const DENO_BIN = (() => {
   const candidates = [
     `${process.env.HOME}/.deno/bin/deno`,
@@ -80,41 +67,8 @@ function cookieArgs(browser: string): string[] {
 }
 
 const HTTP_TIMEOUT_MS = 15_000
-
-// Harte Obergrenze für einen yt-dlp-Aufruf.
-//
-// `proc.kill()` allein genügt nicht: mit `--js-runtimes deno:…` startet yt-dlp
-// einen Deno-Subprozess, der die stdout-Pipe erbt. Stirbt nur yt-dlp, bleibt die
-// Pipe durch das Enkelkind offen und `new Response(proc.stdout).text()` wartet
-// ewig auf EOF. Darum wird zusätzlich gegen eine Deadline gerannt und das
-// Leseergebnis notfalls verworfen.
-async function runYtDlp(args: string[], timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' })
-
-  const collect = (async () => {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    return { exitCode: proc.exitCode ?? -1, stdout, stderr }
-  })()
-
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`yt-dlp timeout nach ${Math.round(timeoutMs / 1000)}s`)),
-      timeoutMs,
-    )
-  })
-
-  try {
-    return await Promise.race([collect, deadline])
-  } finally {
-    clearTimeout(timer)
-    if (proc.exitCode === null) proc.kill('SIGKILL')
-  }
-}
+const META_TIMEOUT_MS = 30_000
+const SUBTITLE_TIMEOUT_MS = 60_000
 
 export function extractVideoId(url: string): string {
   const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
@@ -124,7 +78,6 @@ export function extractVideoId(url: string): string {
 let feedCache: YouTubeVideo[] = []
 let feedFetchedAt = 0
 let feedFetching: Promise<void> | null = null
-let feedExhausted = false
 const FEED_TTL_MS = 5 * 60 * 1000
 const FEED_REFRESH_TIMEOUT_MS = 3 * 60 * 1000
 
@@ -299,7 +252,6 @@ async function refreshFeedCache(_targetCount: number) {
 
   feedCache = videos
   feedFetchedAt = Date.now()
-  feedExhausted = true
 }
 
 export async function fetchSubscriptionFeed(offset = 0, limit = 30): Promise<{ videos: YouTubeVideo[]; total: number; hasMore: boolean }> {
@@ -324,7 +276,6 @@ export async function fetchSubscriptionFeed(offset = 0, limit = 30): Promise<{ v
 export function invalidateFeedCache() {
   feedCache = []
   feedFetchedAt = 0
-  feedExhausted = false
 }
 
 export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string; channel: string; thumbnail: string }> {
@@ -333,20 +284,24 @@ export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string;
   const oembed = await fetchOembedMeta(videoId)
 
   const browser = resolveCookieBrowser()
-  const proc = Bun.spawn(
-    [YT_DLP, ...ytdlpBaseArgs(), '--dump-json', '--skip-download', ...(browser ? cookieArgs(browser) : []), videoUrl],
-    { stdout: 'pipe', stderr: 'pipe' },
-  )
+  const oembedOnly = {
+    title: oembed.title || 'Unknown',
+    channel: oembed.channel || '',
+    thumbnail: oembed.thumbnail || fallbackThumb,
+  }
 
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (proc.exitCode !== 0) {
-    return {
-      title: oembed.title || 'Unknown',
-      channel: oembed.channel || '',
-      thumbnail: oembed.thumbnail || fallbackThumb,
-    }
+  /* Über runYtDlp statt roh: der rohe Spawn liest stderr nie leer, und sobald
+     yt-dlp den Pipe-Puffer füllt, kehrt `await proc.exited` nie zurück. */
+  let stdout: string
+  try {
+    const res = await runYtDlp(
+      [YT_DLP, ...ytdlpBaseArgs(), '--dump-json', '--skip-download', ...(browser ? cookieArgs(browser) : []), videoUrl],
+      META_TIMEOUT_MS,
+    )
+    if (res.exitCode !== 0) return oembedOnly
+    stdout = res.stdout
+  } catch {
+    return oembedOnly
   }
 
   try {
@@ -357,11 +312,7 @@ export async function fetchVideoMeta(videoUrl: string): Promise<{ title: string;
       thumbnail: j.thumbnail ?? j.thumbnails?.at(-1)?.url ?? oembed.thumbnail ?? fallbackThumb,
     }
   } catch {
-    return {
-      title: oembed.title || 'Unknown',
-      channel: oembed.channel || '',
-      thumbnail: oembed.thumbnail || fallbackThumb,
-    }
+    return oembedOnly
   }
 }
 
@@ -370,31 +321,38 @@ export async function downloadSubtitles(videoUrl: string, lang: string): Promise
   const browser = resolveCookieBrowser()
 
   for (const tryLang of langs) {
-    const tmpDir = `/tmp/asi_subs_${Date.now()}_${tryLang}`
+    /* randomUUID statt Date.now(): zwei gleichzeitig gestartete Summaries für
+       dieselbe Sprache trafen sich sonst im selben Verzeichnis und hätten sich
+       gegenseitig die Untertitel untergeschoben. */
+    const tmpDir = `/tmp/asi_subs_${crypto.randomUUID()}_${tryLang}`
     mkdirSync(tmpDir, { recursive: true })
 
-    const cookieStrategies: string[][] = browser ? [cookieArgs(browser), []] : [[]]
+    try {
+      const cookieStrategies: string[][] = browser ? [cookieArgs(browser), []] : [[]]
 
-    for (const extraArgs of cookieStrategies) {
-      for (const flag of ['--write-auto-sub', '--write-sub']) {
-        const proc = Bun.spawn(
-          [YT_DLP, ...ytdlpBaseArgs(), flag, '--sub-lang', tryLang, '--skip-download', ...extraArgs, '-o', `${tmpDir}/%(id)s.%(ext)s`, videoUrl],
-          { stdout: 'pipe', stderr: 'pipe' },
-        )
-        await proc.exited
+      for (const extraArgs of cookieStrategies) {
+        for (const flag of ['--write-auto-sub', '--write-sub']) {
+          try {
+            await runYtDlp(
+              [YT_DLP, ...ytdlpBaseArgs(), flag, '--sub-lang', tryLang, '--skip-download', ...extraArgs, '-o', `${tmpDir}/%(id)s.%(ext)s`, videoUrl],
+              SUBTITLE_TIMEOUT_MS,
+            )
+          } catch {
+            continue // Timeout – nächste Cookie-/Flag-Kombination versuchen
+          }
 
-        const files = readdirSync(tmpDir).filter(f =>
-          f.endsWith('.srt') || f.endsWith('.vtt') || f.endsWith('.json3'),
-        )
-        if (files.length) {
-          const rawContent = readFileSync(join(tmpDir, files[0]), 'utf-8')
-          rmSync(tmpDir, { recursive: true, force: true })
-          return { text: subtitlesToText(rawContent), usedLang: tryLang }
+          const files = readdirSync(tmpDir).filter(f =>
+            f.endsWith('.srt') || f.endsWith('.vtt') || f.endsWith('.json3'),
+          )
+          if (files.length) {
+            const rawContent = readFileSync(join(tmpDir, files[0]), 'utf-8')
+            return { text: subtitlesToText(rawContent), usedLang: tryLang }
+          }
         }
       }
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
     }
-
-    rmSync(tmpDir, { recursive: true, force: true })
   }
 
   throw new Error(`No subtitles found (tried: ${langs.join(', ')})`)

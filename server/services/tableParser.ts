@@ -3,12 +3,7 @@
  * Looks for JSON code blocks with prediction arrays and the "Hauptsprecher" metadata line.
  */
 
-export interface PredictionRow {
-  asset: string
-  direction: string
-  ifCases: string
-  priceTarget: string
-}
+import type { PredictionRow } from '../../shared/types'
 
 export interface SummaryMeta {
   author: string

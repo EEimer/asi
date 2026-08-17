@@ -1,17 +1,18 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions, fetchSettings, fetchTtsIndex, generateTts, getTtsAudioUrl, fetchSummaries } from '../api/endpoints'
-import type { Summary, SummaryListItem, TtsIndex, TtsModel, TtsVoice } from '../../shared/types'
+import { fetchSummary, deleteSummary, addPredictions, updateAuthor, createSummary, fetchVideoSummaries, retrySummary, fetchPredictions, fetchSummaries } from '../api/endpoints'
+import type { Summary, SummaryListItem, TtsModel, TtsVariantConfig, TtsVoice } from '../../shared/types'
 import { MODEL_OPTIONS, MODEL_TIER_LABELS, DEFAULT_SETTINGS, modelLabel } from '../../shared/types'
-import { ArrowLeft, ArrowRight, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send, MessageSquare } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, Trash2, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Pencil, Save, User, Plus, Check, RotateCcw, Volume2, Pause, Play, SlidersHorizontal, Send, MessageSquare } from 'lucide-react'
 import { marked } from 'marked'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SummaryChat } from '../components/SummaryChat'
-import { Button, buttonClasses } from '../components/ui/Button'
-import { Badge } from '../components/ui/Badge'
 import { useToast } from '../store/toastStore'
-import { useAudioPlayer } from '../store/audioPlayerStore'
+import { TtsConfigModal } from '../components/TtsConfigModal'
+import { useTtsPlayback, type TtsTarget } from '../hooks/useTtsPlayback'
+import { Badge, Button, Card, Input, Select, Textarea, buttonClasses, CollapsibleSection } from '../components/ui'
+import { POLL_INTERVAL_MS } from '../lib/constants'
 
 interface ParsedPrediction {
   name: string
@@ -20,38 +21,11 @@ interface ParsedPrediction {
   price_target: string
 }
 
-const TTS_CLASSIC_VOICES: TtsVoice[] = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']
-const TTS_EXTENDED_VOICES: TtsVoice[] = ['ballad', 'verse', 'marin', 'cedar']
-
-interface TtsVariantDraft {
-  model: TtsModel
-  voice: TtsVoice
-  instructions: string
-}
-
-function modelShortLabel(model: string): string {
-  return modelLabel(model)
-}
 
 function ttsModelShortLabel(model: TtsModel): string {
   if (model === 'tts-1') return 'tts-1'
   if (model === 'tts-1-hd') return 'tts-1-hd'
   return '4o-mini-tts'
-}
-
-function ttsVoiceOptions(model: TtsModel): TtsVoice[] {
-  if (model === 'gpt-4o-mini-tts') return [...TTS_CLASSIC_VOICES, ...TTS_EXTENDED_VOICES]
-  return TTS_CLASSIC_VOICES
-}
-
-function normalizeInstructions(value: string): string {
-  return value.trim()
-}
-
-function estimateDurationSecondsFromText(text: string): number {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return 0
-  return Math.max(1, Math.round(normalized.length / 14))
 }
 
 function stripMetadataSection(text: string): string {
@@ -118,9 +92,12 @@ function directionBadge(d: string): { variant: 'success' | 'danger' | 'secondary
   return { variant: 'secondary', Icon: Minus }
 }
 
-const EDIT_INPUT_CLS = 'w-full text-xs px-2 py-1.5 border border-surfaceBorder rounded-sm bg-inputBg text-content focus:outline-none focus:ring-1 focus:ring-primary/40'
-const EDIT_TEXTAREA_CLS = `${EDIT_INPUT_CLS} resize-y leading-snug`
-const EDIT_CELL_CLS = 'w-full text-left -mx-1 px-1 py-0.5 rounded cursor-text hover:bg-accent/10 hover:ring-1 hover:ring-accent/20 transition-colors'
+/* Mehrzeilig in einer Tabellenzelle: die Mindesthoehe der Textarea waere hier zu
+   hoch, deshalb per className zurueckgenommen. */
+const EDIT_TEXTAREA_CLS = 'min-h-0 resize-y py-1 text-xs leading-snug'
+/* Die Zelle selbst ist das Klickziel zum Bearbeiten – kein Control, deshalb nur
+   ein Hover-Hinweis und kein Rahmen. */
+const EDIT_CELL_CLS = 'w-full text-left -mx-1 px-1 py-0.5 rounded-sm cursor-text hover:bg-content/[0.04] transition-colors'
 
 interface PredictionsTableProps {
   predictions: ParsedPrediction[]
@@ -234,6 +211,7 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
       addToast('Asset ist erforderlich', 'error', 2500)
       return
     }
+    const created: ParsedPrediction = { name, direction: newDirection, if_cases: ifCases, price_target: priceTarget }
     setDirectAdding(true)
     try {
       await addPredictions({
@@ -242,13 +220,20 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
         videoUrl,
         channelName,
         author,
-        predictions: [{ name, direction: newDirection, if_cases: ifCases, price_target: priceTarget }],
+        predictions: [created],
       })
       setNewName('')
       setNewDirection('neutral')
       setNewTarget('')
       setNewIfCases('')
-      setItems(prev => [...prev, { name, direction: newDirection, if_cases: ifCases, price_target: priceTarget }])
+      setItems(prev => [...prev, created])
+      /* Ohne diesen Eintrag bleibt der "Hinzufügen"-Button der neuen Zeile aktiv
+         und ein zweiter Klick legt die Prognose ein zweites Mal an. */
+      setAddedRows(prev => {
+        const next = new Set(prev)
+        next.add(rowKey(created))
+        return next
+      })
       addToast('Eintrag direkt hinzugefügt', 'success', 2200)
     } catch (e: any) {
       addToast(`Fehler: ${e.message}`, 'error', 5000)
@@ -283,14 +268,14 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
                 <tr key={i} className={`border-t border-surfaceBorderSoft transition-colors ${isEditing ? 'bg-accent/10' : ''}`}>
                   <td className={`px-4 py-2.5 font-medium text-content ${isEditing ? 'align-top' : ''}`}>
                     {isEditing ? (
-                      <input
+                      <Input
                         type="text"
                         autoFocus={editingField === 'name'}
                         value={draft.name}
                         onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
                         onKeyDown={handleEditKey}
                         placeholder="Asset"
-                        className={EDIT_INPUT_CLS}
+                        size="xs"
                       />
                     ) : (
                       <button type="button" onClick={() => startEdit(i, 'name')} className={EDIT_CELL_CLS} title="Bearbeiten">
@@ -300,18 +285,18 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
                   </td>
                   <td className={`px-4 py-2.5 ${isEditing ? 'align-top' : ''}`}>
                     {isEditing ? (
-                      <select
+                      <Select
                         autoFocus={editingField === 'direction'}
                         value={draft.direction}
                         onChange={e => setDraft(d => ({ ...d, direction: e.target.value }))}
                         onKeyDown={handleEditKey}
-                        className={EDIT_INPUT_CLS}
+                        size="xs"
                       >
                         {!['long', 'short', 'neutral'].includes(draft.direction) && <option value={draft.direction}>{draft.direction || '—'}</option>}
                         <option value="long">long</option>
                         <option value="short">short</option>
                         <option value="neutral">neutral</option>
-                      </select>
+                      </Select>
                     ) : (
                       <button type="button" onClick={() => startEdit(i, 'direction')} className={EDIT_CELL_CLS} title="Bearbeiten">
                         <Badge variant={dirVariant}>
@@ -322,7 +307,7 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
                   </td>
                   <td className={`px-4 py-2.5 text-muted ${isEditing ? 'align-top' : ''}`}>
                     {isEditing ? (
-                      <textarea
+                      <Textarea
                         autoFocus={editingField === 'price_target'}
                         rows={3}
                         value={draft.price_target}
@@ -339,7 +324,7 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
                   </td>
                   <td className={`px-4 py-2.5 text-sm text-content ${isEditing ? 'align-top' : ''}`}>
                     {isEditing ? (
-                      <textarea
+                      <Textarea
                         autoFocus={editingField === 'if_cases'}
                         rows={3}
                         value={draft.if_cases}
@@ -387,45 +372,45 @@ function PredictionsTable({ predictions, summaryId, videoTitle, videoUrl, channe
             })}
             <tr className="border-t border-surfaceBorder bg-rowHover/40">
               <td className="px-4 py-2.5">
-                <input
+                <Input
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                   placeholder="Asset"
                   disabled={directAdding}
-                  className="w-full text-xs px-2 py-1.5 border border-surfaceBorder rounded-sm bg-inputBg text-content focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50"
+                  size="xs"
                 />
               </td>
               <td className="px-4 py-2.5">
-                <select
+                <Select
                   value={newDirection}
                   onChange={e => setNewDirection(e.target.value)}
                   disabled={directAdding}
-                  className="w-full text-xs px-2 py-1.5 border border-surfaceBorder rounded-sm bg-inputBg text-content focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50"
+                  size="xs"
                 >
                   <option value="long">long</option>
                   <option value="short">short</option>
                   <option value="neutral">neutral</option>
-                </select>
+                </Select>
               </td>
               <td className="px-4 py-2.5">
-                <input
+                <Input
                   type="text"
                   value={newTarget}
                   onChange={e => setNewTarget(e.target.value)}
                   placeholder="Kursziel"
                   disabled={directAdding}
-                  className="w-full text-xs px-2 py-1.5 border border-surfaceBorder rounded-sm bg-inputBg text-content focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50"
+                  size="xs"
                 />
               </td>
               <td className="px-4 py-2.5">
-                <input
+                <Input
                   type="text"
                   value={newIfCases}
                   onChange={e => setNewIfCases(e.target.value)}
                   placeholder="Bedingung"
                   disabled={directAdding}
-                  className="w-full text-xs px-2 py-1.5 border border-surfaceBorder rounded-sm bg-inputBg text-content focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50"
+                  size="xs"
                 />
               </td>
               <td className="w-24 px-3 py-2.5 text-center">
@@ -462,70 +447,38 @@ export default function SummaryDetailView() {
   const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.openaiModel)
   const [creatingModelSummary, setCreatingModelSummary] = useState(false)
   const [retrying, setRetrying] = useState(false)
-  const [ttsDefaults, setTtsDefaults] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
-  const [ttsConfig, setTtsConfig] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
-  const [ttsDraft, setTtsDraft] = useState<TtsVariantDraft>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
+  const tts = useTtsPlayback()
+  const [ttsConfig, setTtsConfig] = useState<TtsVariantConfig>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
+  const [ttsDraft, setTtsDraft] = useState<TtsVariantConfig>({ model: 'tts-1-hd', voice: 'nova', instructions: '' })
   const [ttsConfigOpen, setTtsConfigOpen] = useState(false)
-  const [ttsIndex, setTtsIndex] = useState<TtsIndex>({})
-  const [ttsLoading, setTtsLoading] = useState(false)
-  const [ttsError, setTtsError] = useState('')
   const [ttsAlreadyExistsOpen, setTtsAlreadyExistsOpen] = useState(false)
   const [pendingCachedVariantKey, setPendingCachedVariantKey] = useState<string | null>(null)
-  const [pendingCachedConfig, setPendingCachedConfig] = useState<TtsVariantDraft | null>(null)
-  const player = useAudioPlayer()
+  const [pendingCachedConfig, setPendingCachedConfig] = useState<TtsVariantConfig | null>(null)
   const { addToast } = useToast()
+  /* Die Hooks unten haengen bewusst an der ID, nicht am ganzen summary-Objekt:
+     der Poller ersetzt das Objekt alle 3s durch eine neue Referenz, obwohl sich
+     inhaltlich nichts geaendert hat. */
+  const summaryId = summary?.id
 
   useEffect(() => {
     if (!id) return
     let active = true
+    /* Der Handle muss festgehalten werden: ohne clearTimeout feuert der bereits
+       eingeplante load() auch nach dem Verlassen der Seite noch einen Request. */
+    let timer: ReturnType<typeof setTimeout> | undefined
     const load = async () => {
       try {
         const s = await fetchSummary(id)
-        if (active) setSummary(s)
-        if (active) setSelectedModel(s.model || DEFAULT_SETTINGS.openaiModel)
-        if (active && s.status === 'processing') setTimeout(load, 3000)
+        if (!active) return
+        setSummary(s)
+        setSelectedModel(s.model || DEFAULT_SETTINGS.openaiModel)
+        if (s.status === 'processing') timer = setTimeout(load, POLL_INTERVAL_MS)
       } catch { /* ignore */ }
       finally { if (active) setLoading(false) }
     }
     load()
-    return () => { active = false }
+    return () => { active = false; clearTimeout(timer) }
   }, [id])
-
-  useEffect(() => {
-    let active = true
-    const loadTtsConfig = async () => {
-      try {
-        const [settings, index] = await Promise.all([fetchSettings(), fetchTtsIndex()])
-        if (!active) return
-        const defaults: TtsVariantDraft = {
-          model: settings.ttsModel,
-          voice: settings.ttsVoice,
-          instructions: settings.ttsInstructions,
-        }
-        setTtsDefaults(defaults)
-        setTtsConfig(defaults)
-        setTtsIndex(index)
-      } catch {
-        // ignore
-      }
-    }
-    loadTtsConfig()
-    return () => { active = false }
-  }, [])
-
-  useEffect(() => {
-    if (!id || summary?.status !== 'processing') return
-    const timeout = setTimeout(async () => {
-      try {
-        const s = await fetchSummary(id)
-        setSummary(s)
-        setSelectedModel(s.model || DEFAULT_SETTINGS.openaiModel)
-      } catch {
-        /* ignore */
-      }
-    }, 3000)
-    return () => clearTimeout(timeout)
-  }, [id, summary?.status])
 
   useEffect(() => {
     if (!summary?.videoId) return
@@ -540,12 +493,12 @@ export default function SummaryDetailView() {
     return () => { active = false }
   }, [id])
 
+  /* Beim Wechsel auf eine andere Summary auf die globalen Defaults zurück.
+     Loading und Fehler sind im Hook pro Summary-ID getrennt und brauchen kein Reset. */
   useEffect(() => {
-    if (!summary) return
-    setTtsConfig(ttsDefaults)
-    setTtsLoading(false)
-    setTtsError('')
-  }, [summary?.id, ttsDefaults])
+    if (!summaryId) return
+    setTtsConfig(tts.defaults)
+  }, [summaryId, tts.defaults])
 
   const { htmlParts, predictions } = useMemo(() => {
     if (!summary?.summary) return { htmlParts: [], predictions: [] }
@@ -589,15 +542,6 @@ export default function SummaryDetailView() {
     }
   }
 
-  function updateTtsModel(model: TtsModel) {
-    setTtsDraft(prev => {
-      const options = ttsVoiceOptions(model)
-      const nextVoice = options.includes(prev.voice) ? prev.voice : 'nova'
-      const nextInstructions = model === 'gpt-4o-mini-tts' ? prev.instructions : ''
-      return { ...prev, model, voice: nextVoice, instructions: nextInstructions }
-    })
-  }
-
   function openTtsConfig() {
     setTtsDraft(ttsConfig)
     setTtsConfigOpen(true)
@@ -610,149 +554,60 @@ export default function SummaryDetailView() {
     await handleTtsPlay(draft)
   }
 
-  function findCachedVariantKey(summaryId: string, draft: TtsVariantDraft): string | null {
-    const summaryEntry = ttsIndex[summaryId]
-    if (!summaryEntry) return null
-    for (const [variantKey, variant] of Object.entries(summaryEntry.variants)) {
-      if (
-        variant.model === draft.model
-        && variant.voice === draft.voice
-        && normalizeInstructions(variant.instructions) === normalizeInstructions(draft.instructions)
-      ) {
-        return variantKey
-      }
-    }
-    return null
-  }
+  const ttsTarget: TtsTarget | null = summary
+    ? { id: summary.id, title: summary.videoTitle || 'Summary', text: summary.summary ?? '' }
+    : null
 
-  async function handleTtsPlay(configOverride?: TtsVariantDraft) {
-    if (!summary || summary.status !== 'done' || !summary.summary) return
-    const effectiveConfig = configOverride ?? ttsConfig
-    const cachedVariant = findCachedVariantKey(summary.id, effectiveConfig)
-    const isSameVariant = !!cachedVariant
-      && player.track?.summaryId === summary.id
-      && player.track.variantKey === cachedVariant
+  async function handleTtsPlay(configOverride?: TtsVariantConfig) {
+    if (!summary || !ttsTarget || summary.status !== 'done' || !summary.summary) return
+    const config = configOverride ?? ttsConfig
+    const cachedVariant = tts.findCachedVariant(summary.id, config)
 
-    if (isSameVariant && player.isPlaying) {
-      player.pause()
-      return
-    }
-    if (isSameVariant && !player.isPlaying) {
-      await player.resume()
+    /* Läuft die passende Variante bereits, ist der Klick ein Play/Pause-Toggle.
+       Existiert sie nur im Cache, fragt erst der Dialog nach. */
+    if (cachedVariant && tts.isCurrent(summary.id, cachedVariant)) {
+      await tts.playVariant(ttsTarget, cachedVariant)
       return
     }
     if (cachedVariant) {
       setPendingCachedVariantKey(cachedVariant)
-      setPendingCachedConfig(effectiveConfig)
+      setPendingCachedConfig(config)
       setTtsAlreadyExistsOpen(true)
       return
     }
-    setTtsError('')
-    setTtsLoading(true)
-    try {
-      const result = await generateTts({
-        summaryId: summary.id,
-        text: summary.summary,
-        model: effectiveConfig.model,
-        voice: effectiveConfig.voice,
-        instructions: effectiveConfig.instructions,
-      })
-      const refreshedIndex = await fetchTtsIndex()
-      setTtsIndex(refreshedIndex)
-      await player.playTrack(result.audioUrl, {
-        summaryId: summary.id,
-        variantKey: result.variantKey,
-        title: summary.videoTitle || 'Summary',
-        durationHintSeconds: result.durationSeconds,
-      })
-    } catch (e: any) {
-      setTtsError(e?.message ?? 'TTS fehlgeschlagen')
-    } finally {
-      setTtsLoading(false)
-    }
+    await tts.generateAndPlay(ttsTarget, config).catch(() => {})
   }
 
   async function playPendingCachedVariant() {
-    if (!summary || !pendingCachedVariantKey) return
+    if (!ttsTarget || !pendingCachedVariantKey) return
     const variantKey = pendingCachedVariantKey
     const chosenConfig = pendingCachedConfig
     setTtsAlreadyExistsOpen(false)
     setPendingCachedVariantKey(null)
     setPendingCachedConfig(null)
     if (chosenConfig) setTtsConfig(chosenConfig)
-    setTtsError('')
-    setTtsLoading(true)
-    try {
-      await player.playTrack(getTtsAudioUrl(summary.id, variantKey), {
-        summaryId: summary.id,
-        variantKey,
-        title: summary.videoTitle || 'Summary',
-        durationHintSeconds: ttsIndex[summary.id]?.variants?.[variantKey]?.durationSeconds ?? estimateDurationSecondsFromText(summary.summary ?? ''),
-      })
-    } catch (e: any) {
-      setTtsError(e?.message ?? 'TTS konnte nicht abgespielt werden')
-    } finally {
-      setTtsLoading(false)
-    }
+    await tts.playVariant(ttsTarget, variantKey)
   }
 
   async function handlePlayExistingVariant(variantKey: string) {
-    if (!summary || summary.status !== 'done') return
-    const isSameVariant = player.track?.summaryId === summary.id && player.track.variantKey === variantKey
-    if (isSameVariant && player.isPlaying) {
-      player.pause()
-      return
-    }
-    if (isSameVariant && !player.isPlaying) {
-      await player.resume()
-      return
-    }
-    setTtsError('')
-    setTtsLoading(true)
-    try {
-      await player.playTrack(getTtsAudioUrl(summary.id, variantKey), {
-        summaryId: summary.id,
-        variantKey,
-        title: summary.videoTitle || 'Summary',
-        durationHintSeconds: ttsIndex[summary.id]?.variants?.[variantKey]?.durationSeconds ?? estimateDurationSecondsFromText(summary.summary ?? ''),
+    if (!summary || !ttsTarget || summary.status !== 'done') return
+    await tts.playVariant(ttsTarget, variantKey)
+    const variant = tts.index[summary.id]?.variants?.[variantKey]
+    if (variant) {
+      setTtsConfig({
+        model: variant.model as TtsModel,
+        voice: variant.voice as TtsVoice,
+        instructions: variant.instructions,
       })
-      const variant = ttsIndex[summary.id]?.variants?.[variantKey]
-      if (variant) {
-        setTtsConfig({
-          model: variant.model as TtsModel,
-          voice: variant.voice as TtsVoice,
-          instructions: variant.instructions,
-        })
-      }
-    } catch (e: any) {
-      setTtsError(e?.message ?? 'TTS konnte nicht abgespielt werden')
-    } finally {
-      setTtsLoading(false)
     }
   }
 
-  async function handleTtsSendToTelegram(configOverride?: TtsVariantDraft) {
-    if (!summary || summary.status !== 'done' || !summary.summary) return
-    const effectiveConfig = configOverride ?? ttsConfig
-    setTtsError('')
-    setTtsLoading(true)
+  async function handleTtsSendToTelegram(configOverride?: TtsVariantConfig) {
+    if (!summary || !ttsTarget || summary.status !== 'done' || !summary.summary) return
     try {
-      await generateTts({
-        summaryId: summary.id,
-        text: summary.summary,
-        model: effectiveConfig.model,
-        voice: effectiveConfig.voice,
-        instructions: effectiveConfig.instructions,
-        sendToTelegram: true,
-      })
-      const refreshedIndex = await fetchTtsIndex()
-      setTtsIndex(refreshedIndex)
+      await tts.sendToTelegram(ttsTarget, configOverride ?? ttsConfig)
       addToast('TTS an Telegram gesendet', 'success', 3000)
-    } catch (e: any) {
-      setTtsError(e?.message ?? 'TTS konnte nicht an Telegram gesendet werden')
-    } finally {
-      setTtsLoading(false)
-    }
+    } catch { /* Meldung steht bereits im Hook-State */ }
   }
 
   const versionsByModel = useMemo(() => {
@@ -773,16 +628,16 @@ export default function SummaryDetailView() {
   }, [versionsByModel])
 
   const hasCachedVariant = useMemo(() => {
-    if (!summary) return false
-    return !!findCachedVariantKey(summary.id, ttsConfig)
-  }, [summary?.id, ttsConfig, ttsIndex])
+    if (!summaryId) return false
+    return !!tts.findCachedVariant(summaryId, ttsConfig)
+  }, [summaryId, ttsConfig, tts.findCachedVariant])
 
   const summaryCharCount = useMemo(() => (summary?.summary ?? '').length, [summary?.summary])
   const summaryWordCount = useMemo(() => (summary?.summary ?? '').trim().split(/\s+/).filter(Boolean).length, [summary?.summary])
 
   const availableTtsVariants = useMemo(() => {
-    if (!summary) return [] as { variantKey: string; model: TtsModel; voice: TtsVoice; instructions: string; createdAt: string }[]
-    const variants = ttsIndex[summary.id]?.variants ?? {}
+    if (!summaryId) return [] as { variantKey: string; model: TtsModel; voice: TtsVoice; instructions: string; createdAt: string }[]
+    const variants = tts.index[summaryId]?.variants ?? {}
     return Object.entries(variants)
       .map(([variantKey, value]) => ({
         variantKey,
@@ -792,14 +647,17 @@ export default function SummaryDetailView() {
         createdAt: value.createdAt,
       }))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  }, [summary?.id, ttsIndex])
+  }, [summaryId, tts.index])
+
+  const ttsLoading = summaryId ? tts.isLoading(summaryId) : false
+  const ttsError = summaryId ? tts.errorFor(summaryId) : ''
 
   const ttsState = useMemo<'idle' | 'loading' | 'playing' | 'paused'>(() => {
     if (ttsLoading) return 'loading'
-    if (!summary) return 'idle'
-    if (player.track?.summaryId !== summary.id) return 'idle'
-    return player.isPlaying ? 'playing' : 'paused'
-  }, [ttsLoading, summary?.id, player.track?.summaryId, player.isPlaying])
+    if (!summaryId) return 'idle'
+    if (tts.track?.summaryId !== summaryId) return 'idle'
+    return tts.isPlaying ? 'playing' : 'paused'
+  }, [ttsLoading, summaryId, tts.track?.summaryId, tts.isPlaying])
 
   const { previousSummary, nextSummary } = useMemo(() => {
     const empty = { previousSummary: null as SummaryListItem | null, nextSummary: null as SummaryListItem | null }
@@ -862,7 +720,7 @@ export default function SummaryDetailView() {
         </button>
       </div>
 
-      <div className="card-elevation bg-panel border border-surfaceBorder rounded-xl overflow-hidden">
+      <Card className="overflow-hidden">
         {summary.thumbnailUrl && (
           <div className="relative">
             <img src={summary.thumbnailUrl} alt="" className="w-full h-56 object-cover bg-inputBg"
@@ -879,7 +737,7 @@ export default function SummaryDetailView() {
                   {/* Badges liegen auf dem abgedunkelten Thumbnail, nicht auf einer Panel-Flaeche –
                       deshalb weiss/schwarz statt Theme-Tokens: in beiden Themes derselbe Grund. */}
                   <span className="inline-flex text-[11px] font-medium px-2 py-0.5 rounded-sm border text-white border-white/40 bg-primary/70">
-                    {modelShortLabel(summary.model)}
+                    {modelLabel(summary.model)}
                   </span>
                   <span className="inline-flex text-[11px] font-medium px-2 py-0.5 rounded-sm border text-white/90 border-white/40 bg-black/30">
                     {summaryCharCount.toLocaleString('de-DE')} Chars
@@ -909,7 +767,7 @@ export default function SummaryDetailView() {
                 disabled={v.id === summary.id}
                 className="disabled:opacity-100"
               >
-                {modelShortLabel(v.model)}
+                {modelLabel(v.model)}
               </Button>
             ))}
           </div>
@@ -962,7 +820,7 @@ export default function SummaryDetailView() {
                   TTS
                 </Button>
                 {availableTtsVariants.map(variant => {
-                  const isActive = player.track?.summaryId === summary.id && player.track.variantKey === variant.variantKey
+                  const isActive = tts.isCurrent(summary.id, variant.variantKey)
                   return (
                     <Button
                       key={variant.variantKey}
@@ -972,7 +830,7 @@ export default function SummaryDetailView() {
                       onClick={() => handlePlayExistingVariant(variant.variantKey)}
                       title={`${variant.model} · ${variant.voice}`}
                     >
-                      {isActive && player.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                      {isActive && tts.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                       {ttsModelShortLabel(variant.model)} · {variant.voice}
                     </Button>
                   )
@@ -1061,7 +919,7 @@ export default function SummaryDetailView() {
             <User className="w-4 h-4 text-dim shrink-0" />
             {editingAuthor ? (
               <>
-                <input
+                <Input
                   type="text"
                   value={authorDraft}
                   onChange={e => setAuthorDraft(e.target.value)}
@@ -1074,7 +932,8 @@ export default function SummaryDetailView() {
                     }
                   }}
                   autoFocus
-                  className="flex-1 h-8 text-sm bg-inputBg text-content border border-surfaceBorder rounded-sm px-3 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  size="sm"
+                  className="flex-1"
                   placeholder="Autor / Sprecher eingeben..."
                 />
                 <Button
@@ -1103,20 +962,19 @@ export default function SummaryDetailView() {
         )}
 
         {summary.transcript && (
-          <div className="border-t border-surfaceBorderSoft">
-            <button type="button" onClick={() => setShowTranscript(!showTranscript)}
-              className="w-full flex items-center justify-between p-5 text-sm text-muted hover:bg-rowHover transition-colors">
-              <span>Transkript ({summary.transcript.length.toLocaleString('de-DE')} Zeichen · {summary.transcript.split(/\s+/).filter(Boolean).length.toLocaleString('de-DE')} Wörter)</span>
-              {showTranscript ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-            {showTranscript && (
-              <div className="px-5 pb-5">
-                <div className="bg-inputBg rounded-lg p-4 text-xs text-muted leading-relaxed max-h-96 overflow-y-auto">{summary.transcript.replace(/\n/g, ' ')}</div>
-              </div>
-            )}
-          </div>
+          <CollapsibleSection
+            className="border-t border-surfaceBorderSoft px-5"
+            open={showTranscript}
+            onOpenChange={setShowTranscript}
+            title={`Transkript (${summary.transcript.length.toLocaleString('de-DE')} Zeichen · ${summary.transcript.split(/\s+/).filter(Boolean).length.toLocaleString('de-DE')} Wörter)`}
+            contentClassName="pb-5"
+          >
+            <div className="bg-inputBg rounded-sm p-4 text-xs text-content/70 leading-relaxed max-h-96 overflow-y-auto">
+              {summary.transcript.replace(/\n/g, ' ')}
+            </div>
+          </CollapsibleSection>
         )}
-      </div>
+      </Card>
 
       <ConfirmModal
         open={deleteOpen}
@@ -1128,56 +986,15 @@ export default function SummaryDetailView() {
         variant="danger"
       />
 
-      <Modal
+      <TtsConfigModal
         open={ttsConfigOpen}
+        description={summary?.videoTitle}
+        draft={ttsDraft}
+        onDraftChange={setTtsDraft}
         onClose={() => setTtsConfigOpen(false)}
-        title="TTS Config"
-        description={summary?.videoTitle || 'Nur für diese Summary. Globale Defaults bleiben unverändert.'}
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-content mb-1">Modell</label>
-            <select
-              value={ttsDraft.model}
-              onChange={e => updateTtsModel(e.target.value as TtsModel)}
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40"
-            >
-              <option value="tts-1">tts-1</option>
-              <option value="tts-1-hd">tts-1-hd</option>
-              <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-content mb-1">Stimme</label>
-            <select
-              value={ttsDraft.voice}
-              onChange={e => setTtsDraft(prev => ({ ...prev, voice: e.target.value as TtsVoice }))}
-              className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary/40"
-            >
-              {ttsVoiceOptions(ttsDraft.model).map(voice => {
-                const recommended = ttsDraft.model === 'gpt-4o-mini-tts' && (voice === 'marin' || voice === 'cedar')
-                return <option key={voice} value={voice}>{recommended ? `${voice} - ★ Empfohlen` : voice}</option>
-              })}
-            </select>
-          </div>
-          {ttsDraft.model === 'gpt-4o-mini-tts' && (
-            <div>
-              <label className="block text-sm font-medium text-content mb-1">Instruktionen</label>
-              <input
-                type="text"
-                value={ttsDraft.instructions}
-                onChange={e => setTtsDraft(prev => ({ ...prev, instructions: e.target.value }))}
-                placeholder={'z.B. "Speak slowly and clearly in German"'}
-                className="w-full px-3 py-2 text-sm bg-inputBg border border-surfaceBorder rounded-lg text-content placeholder:text-dim focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-            </div>
-          )}
-        </div>
-        <ModalFooter>
-          <Button variant="cancel" outline onClick={() => setTtsConfigOpen(false)}>Abbrechen</Button>
-          <Button onClick={applyTtsConfigForSummary} disabled={ttsLoading}>TTS</Button>
-        </ModalFooter>
-      </Modal>
+        onSubmit={applyTtsConfigForSummary}
+        submitDisabled={ttsLoading}
+      />
 
       <Modal
         open={ttsAlreadyExistsOpen}
