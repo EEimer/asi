@@ -1,15 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary, fetchCustomPrompts } from '../api/endpoints'
-import type { CustomPrompt, SummaryDetail, TtsIndex, TtsModel, TtsVoice, YouTubeVideo } from '../../shared/types'
-import { MODEL_OPTIONS, DEFAULT_SETTINGS, SUMMARY_DETAIL_LABELS } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, LinkIcon, Play, Send, Check, Wand2, Zap } from 'lucide-react'
-import { Modal, ModalFooter } from '../components/Modal'
+import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary } from '../api/endpoints'
+import type { SummaryDetail, YouTubeVideo } from '../../shared/types'
+import { SUMMARY_DETAIL_LABELS } from '../../shared/types'
+import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, Play, Send, Check, Zap } from 'lucide-react'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { useTtsPlayback, type TtsTarget } from '../hooks/useTtsPlayback'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
 import { POLL_INTERVAL_MS, appendUnique } from '../lib/constants'
-import { Badge, Button, Card, Input, buttonClasses, SkeletonList } from '../components/ui'
+import { useSummaryLaunch } from '../store/summaryLaunchStore'
+import { Badge, Button, Card, buttonClasses, SkeletonList } from '../components/ui'
 
 const PAGE_SIZE = 30
 type PendingTtsMode = 'play' | 'telegram'
@@ -58,18 +58,6 @@ export default function BrowseView() {
   const sentinelRef = useRef<HTMLDivElement>(null)
   const videosLenRef = useRef(0)
   videosLenRef.current = videos.length
-  const [linkModalOpen, setLinkModalOpen] = useState(false)
-  const [manualUrl, setManualUrl] = useState('')
-  const [manualDetail, setManualDetail] = useState<SummaryDetail>('long')
-  const [submitting, setSubmitting] = useState(false)
-  const [customPromptModalOpen, setCustomPromptModalOpen] = useState(false)
-  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([])
-  const [customPromptsLoading, setCustomPromptsLoading] = useState(false)
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null)
-  const [customPromptUrl, setCustomPromptUrl] = useState('')
-  const [customPromptSubmitting, setCustomPromptSubmitting] = useState(false)
-  const [defaultModel, setDefaultModel] = useState(DEFAULT_SETTINGS.openaiModel)
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.openaiModel)
   const [channelFilterMode, setChannelFilterMode] = useState<'filtered' | 'all'>('filtered')
   const [blockedChannels, setBlockedChannels] = useState<string[]>([])
   const tts = useTtsPlayback()
@@ -124,15 +112,33 @@ export default function BrowseView() {
 
   useEffect(() => { loadFeed(true) }, [loadFeed])
   useEffect(() => { refreshSummaryStatusMaps() }, [])
+
+  /* Link/Custom stehen in der Kopfzeile, also ausserhalb dieser Liste. Ein dort
+     gestarteter Lauf bekommt hier sofort seine Platzhalterkarte - sonst taucht das
+     Video erst beim naechsten Feed-Refresh auf, falls ueberhaupt (Abo-Filter). */
+  const pendingLaunches = useSummaryLaunch(s => s.pending)
+  const consumeLaunches = useSummaryLaunch(s => s.consume)
   useEffect(() => {
-    fetchSettings()
-      .then(s => {
-        setDefaultModel(s.openaiModel)
-        setSelectedModel(s.openaiModel)
-        setBlockedChannels(s.blockedChannels)
+    if (pendingLaunches.length === 0) return
+    for (const { videoId, summaryId, url, detail } of pendingLaunches) {
+      setProcessing(prev => new Map(prev).set(videoId, summaryId))
+      if (detail) setDetailById(prev => new Map(prev).set(summaryId, detail))
+      setFailed(prev => {
+        const next = new Map(prev)
+        next.delete(videoId)
+        return next
       })
-      .catch(() => {})
-  }, [])
+      setVideos(prev => {
+        if (prev.some(v => v.id === videoId)) return prev
+        return [{
+          id: videoId, title: 'Wird geladen...', channel: '', channelUrl: '',
+          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          duration: 0, durationFormatted: '', uploadDate: '', url,
+        }, ...prev]
+      })
+    }
+    consumeLaunches()
+  }, [pendingLaunches, consumeLaunches])
 
   // Blocked list can change elsewhere (Settings) - re-sync when the feed mode flips.
   useEffect(() => {
@@ -307,82 +313,6 @@ export default function BrowseView() {
     }
   }
 
-  async function handleManualUrl() {
-    const url = manualUrl.trim()
-    if (!url) return
-    const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
-    if (!match) { alert('Kein gültiger YouTube Link'); return }
-    const videoId = match[1]
-
-    setSubmitting(true)
-    try {
-      const result = await createSummary(url, undefined, undefined, undefined, undefined, manualDetail)
-      setProcessing(prev => new Map(prev).set(videoId, result.id))
-      setDetailById(prev => new Map(prev).set(result.id, manualDetail))
-
-      // Add a placeholder video to the top of the list
-      setVideos(prev => {
-        if (prev.some(v => v.id === videoId)) return prev
-        return [{
-          id: videoId,
-          title: 'Wird geladen...',
-          channel: '',
-          channelUrl: '',
-          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-          duration: 0,
-          durationFormatted: '',
-          uploadDate: '',
-          url,
-        }, ...prev]
-      })
-
-      setManualUrl('')
-      setLinkModalOpen(false)
-    } catch (e: any) { alert(`Fehler: ${e.message}`) }
-    finally { setSubmitting(false) }
-  }
-
-  async function openCustomPromptModal() {
-    setCustomPromptUrl('')
-    setSelectedPromptId(null)
-    setSelectedModel(defaultModel)
-    setCustomPromptModalOpen(true)
-    setCustomPromptsLoading(true)
-    try {
-      const prompts = await fetchCustomPrompts()
-      setCustomPrompts(prompts)
-      setSelectedPromptId(prompts[0]?.id ?? null)
-    } catch {}
-    finally { setCustomPromptsLoading(false) }
-  }
-
-  async function handleCustomPromptSubmit() {
-    const url = customPromptUrl.trim()
-    if (!url || !selectedPromptId) return
-    const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/)
-    if (!match) { alert('Kein gültiger YouTube Link'); return }
-    const videoId = match[1]
-    const prompt = customPrompts.find(p => p.id === selectedPromptId)
-    if (!prompt) return
-    setCustomPromptSubmitting(true)
-    try {
-      const result = await createSummary(url, undefined, undefined, selectedModel, prompt.text)
-      setProcessing(prev => new Map(prev).set(videoId, result.id))
-      setVideos(prev => {
-        if (prev.some(v => v.id === videoId)) return prev
-        return [{
-          id: videoId, title: 'Wird geladen...', channel: '', channelUrl: '',
-          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-          duration: 0, durationFormatted: '', uploadDate: '', url,
-        }, ...prev]
-      })
-      setCustomPromptUrl('')
-      setSelectedPromptId(null)
-      setCustomPromptModalOpen(false)
-    } catch (e: any) { alert(`Fehler: ${e.message}`) }
-    finally { setCustomPromptSubmitting(false) }
-  }
-
   async function handleBlock(channel: string) {
     if (!channel) return
     try {
@@ -430,12 +360,6 @@ export default function BrowseView() {
             value={channelFilterMode}
             onChange={setChannelFilterMode}
           />
-          <Button size="sm" onClick={() => { setManualUrl(''); setLinkModalOpen(true) }}>
-            <LinkIcon className="w-3.5 h-3.5" /> YouTube Link
-          </Button>
-          <Button size="sm" variant="cancel" outline onClick={openCustomPromptModal}>
-            <Wand2 className="w-3.5 h-3.5" /> Custom Prompt
-          </Button>
           <Button size="sm" variant="cancel" outline iconOnly onClick={handleRefresh} disabled={loading} title="Feed aktualisieren">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </Button>
@@ -594,122 +518,6 @@ export default function BrowseView() {
           )}
         </>
       )}
-
-      <Modal open={customPromptModalOpen} onClose={() => setCustomPromptModalOpen(false)} title="Mit Custom Prompt zusammenfassen">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1.5">YouTube URL</label>
-            <Input
-              type="text"
-              placeholder="https://www.youtube.com/watch?v=..."
-              value={customPromptUrl}
-              onChange={e => setCustomPromptUrl(e.target.value)}
-              autoFocus
-              onPaste={e => {
-                const text = e.clipboardData.getData('text').trim()
-                if (text.match(/(?:youtube\.com|youtu\.be)/)) {
-                  e.preventDefault()
-                  setCustomPromptUrl(text)
-                }
-              }}
-              
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1.5">Prompt auswählen</label>
-            {customPromptsLoading ? (
-              <div className="flex items-center gap-2 py-4 text-dim text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" /> Prompts laden...
-              </div>
-            ) : customPrompts.length === 0 ? (
-              <p className="text-sm text-dim italic py-2">Keine Custom Prompts vorhanden. Zuerst in den Einstellungen anlegen.</p>
-            ) : (
-              <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-                {/* Auswahllisten sind keine Buttons: eine Zeile, aktiv = Primary-Tönung. */}
-                {customPrompts.map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setSelectedPromptId(p.id)}
-                    className={`w-full text-left px-3 py-2 text-sm rounded-sm border transition-colors ${
-                      selectedPromptId === p.id
-                        ? 'bg-primary/15 border-primary/40 text-primary font-medium'
-                        : 'bg-inputBg border-surfaceBorder text-content hover:bg-rowHover'
-                    }`}
-                  >
-                    {p.title}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1.5">Modell</label>
-            <div className="flex flex-wrap gap-1.5">
-              {MODEL_OPTIONS.map(o => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => setSelectedModel(o.value)}
-                  className={`w-28 px-2 py-1.5 text-xs rounded-sm border transition-colors truncate ${
-                    selectedModel === o.value
-                      ? 'bg-primary/15 border-primary/40 text-primary font-medium'
-                      : 'bg-inputBg border-surfaceBorder text-muted hover:bg-rowHover'
-                  }`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <ModalFooter>
-          <Button variant="cancel" outline onClick={() => setCustomPromptModalOpen(false)}>Abbrechen</Button>
-          <Button
-            onClick={handleCustomPromptSubmit}
-            disabled={customPromptSubmitting || !customPromptUrl.trim() || !selectedPromptId}
-            loading={customPromptSubmitting}
-          >
-            <Wand2 className="w-4 h-4" /> Zusammenfassen
-          </Button>
-        </ModalFooter>
-      </Modal>
-
-      <Modal open={linkModalOpen} onClose={() => setLinkModalOpen(false)} title="YouTube Video zusammenfassen">
-        <p className="text-sm text-muted mb-3">Füge einen YouTube-Link ein um das Video zusammenzufassen.</p>
-        <Input
-          type="text"
-          placeholder="https://www.youtube.com/watch?v=..."
-          value={manualUrl}
-          onChange={e => setManualUrl(e.target.value)}
-          autoFocus
-          onKeyDown={e => { if (e.key === 'Enter') handleManualUrl() }}
-          onPaste={e => {
-            const text = e.clipboardData.getData('text').trim()
-            if (text.match(/(?:youtube\.com|youtu\.be)/)) {
-              e.preventDefault()
-              setManualUrl(text)
-            }
-          }}
-          
-        />
-        <div className="flex items-center justify-between gap-3 mt-3">
-          <span className="text-xs text-muted">{manualDetail === 'short' ? 'Nur die 2-3 Kernaussagen' : 'Ausführlich mit allen Details'}</span>
-          <SegmentedControl<SummaryDetail>
-            size="sm"
-            values={['short', 'long']}
-            labels={[SUMMARY_DETAIL_LABELS.short, SUMMARY_DETAIL_LABELS.long]}
-            value={manualDetail}
-            onChange={setManualDetail}
-          />
-        </div>
-        <ModalFooter>
-          <Button variant="cancel" outline onClick={() => setLinkModalOpen(false)}>Abbrechen</Button>
-          <Button onClick={handleManualUrl} disabled={submitting || !manualUrl.trim()} loading={submitting}>
-            <Sparkles className="w-4 h-4" /> Zusammenfassen
-          </Button>
-        </ModalFooter>
-      </Modal>
     </div>
   )
 }

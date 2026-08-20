@@ -24,14 +24,15 @@ export default function NavAudioPlayer() {
     return Math.max(0, Math.min(100, (currentTime / effectiveDuration) * 100))
   }, [currentTime, effectiveDuration])
 
-  const hasTrack = !!track
-  const showOverlay = hovered && hasTrack
-
   async function togglePlayPause() {
     if (!track || isLoading) return
     if (isPlaying) pause()
     else await resume()
   }
+
+  /* Ohne aktive Wiedergabe hat der Knopf nichts zu steuern - dann bleibt die
+     Kopfzeile leer statt einen dauerhaft toten Lautsprecher zu zeigen. */
+  if (!track) return null
 
   return (
     <div
@@ -45,8 +46,8 @@ export default function NavAudioPlayer() {
         outline
         iconOnly
         onClick={togglePlayPause}
-        disabled={!hasTrack || isLoading}
-        title={hasTrack ? 'Audio Player' : 'Kein Audio aktiv'}
+        disabled={isLoading}
+        title="Audio Player"
       >
         {isLoading
           ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -55,7 +56,7 @@ export default function NavAudioPlayer() {
             : <Volume2 className="w-4 h-4" />}
       </Button>
 
-      {showOverlay && (
+      {hovered && (
         <div className="absolute right-0 top-11 w-72 rounded-xl border border-surfaceBorder bg-panel shadow-lg p-3 z-50">
           <p className="text-[11px] text-muted mb-1">Jetzt wird abgespielt</p>
           <p className="text-sm font-medium text-content truncate">{track.title}</p>

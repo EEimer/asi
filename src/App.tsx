@@ -10,6 +10,7 @@ import XView from './views/XView'
 import ToastStack from './components/ToastStack'
 import ProcessingConsole from './components/ProcessingConsole'
 import NavAudioPlayer from './components/NavAudioPlayer'
+import NavSummarizeActions from './components/NavSummarizeActions'
 
 const navItems = [
   { to: '/browse', label: 'Browse', icon: Youtube },
@@ -44,7 +45,10 @@ export default function App() {
               </NavLink>
             ))}
           </nav>
-          <NavAudioPlayer />
+          <div className="flex items-center gap-2">
+            <NavAudioPlayer />
+            <NavSummarizeActions />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">
