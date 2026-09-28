@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    ASI. Jade-Kachel, darauf ein Prompt-Winkel in Graphit und darunter eine weisse Zeile:
+    oben die Eingabe, darunter das Destillat. Der Farbwechsel im Zeichen ist Absicht –
+    ein einfarbiges ">_" waere ein beliebiges Terminal-Icon.
+    Bewusst weit weg vom Schwester-Projekt wealth (Indigo-Kachel, weisses P): anderer
+    Farbkreis-Sektor UND umgekehrte Polaritaet (dunkles Zeichen auf heller Kachel).
+  -->
+  <defs>
+    <linearGradient id="asiTile" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#3FD9A2"/>
+      <stop offset="1" stop-color="#0C7C59"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#asiTile)"/>
+  <rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="8"/>
+
+  <!-- Eingabe: Winkel, Staerke 70 gleicht aus, was die runden Kappen bei 16px wegfressen -->
+  <path d="M134 148 L240 250 L134 352" fill="none" stroke="#12161F" stroke-width="70"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Destillat: liegt auf der Grundlinie des Winkels (Mittelachse y=352) -->
+  <rect x="270" y="314" width="152" height="76" rx="38" fill="#FFFFFF"/>
+</svg>

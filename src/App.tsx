@@ -11,6 +11,8 @@ import ToastStack from './components/ToastStack'
 import ProcessingConsole from './components/ProcessingConsole'
 import NavAudioPlayer from './components/NavAudioPlayer'
 import NavSummarizeActions from './components/NavSummarizeActions'
+import BrandMark from './components/BrandMark'
+import { useWeeklyWealthBackup } from './hooks/useWeeklyWealthBackup'
 
 const navItems = [
   { to: '/browse', label: 'Browse', icon: Youtube },
@@ -22,14 +24,17 @@ const navItems = [
 ]
 
 export default function App() {
+  useWeeklyWealthBackup()
+
   return (
     <div className="min-h-screen pb-12">
       <ToastStack />
       <header className="app-header border-b border-surfaceBorder bg-panel sticky top-0 z-20">
         <div className="mx-auto max-w-7xl px-4 flex items-center gap-6 h-14">
           <div className="flex items-center gap-2 mr-4">
-            {/* Markenrot von YouTube, kein Theme-Ton – bleibt in beiden Themes gleich. */}
-            <Youtube className="w-6 h-6 text-[rgb(255,0,0)]" />
+            {/* Das Zeichen bringt seine eigene Kachel mit – deshalb kein Hintergrund und
+                ein Radius in Prozent, damit nichts ueber die runden Ecken hinausragt. */}
+            <BrandMark className="w-7 h-7 shrink-0 rounded-[22%]" />
             <div className="leading-none">
               <span className="text-base font-bold text-content tracking-tight">YouTube</span>
               <span className="block text-[10px] font-medium text-dim tracking-wide uppercase">Assistent</span>

@@ -39,6 +39,15 @@ db.exec(`
   )
 `)
 
+/* Interner Merkzettel des Servers (z. B. wann die Wealth-Sicherung zuletzt lief). Bewusst nicht in
+   `settings`: das "Settings zuruecksetzen" in der Oberflaeche leert jene Tabelle komplett. */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )
+`)
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS notes (
     id         TEXT PRIMARY KEY,
@@ -111,11 +120,21 @@ if (currentPrompt?.value?.startsWith(OLD_PROMPT_PREFIX)) {
   db.query('UPDATE settings SET value = ? WHERE key = ?').run(DEFAULT_SETTINGS.summaryPrompt, 'summary_prompt')
 }
 
+/* Die erste Fassung des Mittel-Prompts kam in der Praxis fast auf Lang-Länge heraus.
+   Der Ersatz greift nur, solange die Eröffnungszeile unverändert ist – wer den Prompt
+   selbst umgeschrieben hat, behält seine Fassung. */
+const OLD_MEDIUM_PREFIX = 'Du bist ein Experte für kompakte Zusammenfassungen von YouTube-Videos.'
+const currentMedium = db.query('SELECT value FROM settings WHERE key = ?').get('medium_summary_prompt') as { value: string } | null
+if (currentMedium?.value?.startsWith(OLD_MEDIUM_PREFIX)) {
+  db.query('UPDATE settings SET value = ? WHERE key = ?').run(DEFAULT_SETTINGS.mediumSummaryPrompt, 'medium_summary_prompt')
+}
+
 const existingKeys = db.query('SELECT key FROM settings').all() as { key: string }[]
 const existing = new Set(existingKeys.map(r => r.key))
 const defaults: Record<string, string> = {
   summary_prompt: DEFAULT_SETTINGS.summaryPrompt,
   short_summary_prompt: DEFAULT_SETTINGS.shortSummaryPrompt,
+  medium_summary_prompt: DEFAULT_SETTINGS.mediumSummaryPrompt,
   default_lang: DEFAULT_SETTINGS.defaultLang,
   cookie_browser: DEFAULT_SETTINGS.cookieBrowser,
   openai_model: DEFAULT_SETTINGS.openaiModel,

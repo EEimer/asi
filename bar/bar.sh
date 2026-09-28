@@ -53,12 +53,36 @@ fi
 
 # ------------------------------------------------------- Titelzeile ----------
 
+# Projekt-Icon statt Emoji: die Favicon-Kachel, klein auf transparentem Rand.
+# Der Rand ist noetig — SwiftBar zieht ein Bild auf Leistenhoehe, ohne ihn kaeme
+# die Kachel bildschirmfuellend heraus.
+#
+# Die Kachelfarbe traegt den Status: gruen laeuft, gelb Server ohne Vite, rot
+# aus. Deshalb image= und nicht templateImage — letzteres waere einfarbig.
+#
+# Die PNGs liegen bewusst ausserhalb dieses Ordners: hier drin wuerde SwiftBar
+# jede Datei als Plugin-Kandidaten behandeln. Erzeugt von
+# scripts/menubar/build-icons.py, Groesse dort ueber TILE_RATIO.
+ICON_DIR="/Users/ee/Documents/asi/scripts/menubar"
+
+icon_b64() {
+  # base64 bricht die Ausgabe je nach Version um — SwiftBar braucht eine Zeile.
+  [ -f "$1" ] && base64 < "$1" | tr -d '\n'
+}
+
 if [ -z "$SERVER_RUNNING" ]; then
-  echo "👾 $AUDIO_ICON | color=red"
+  ICON_B64=$(icon_b64 "$ICON_DIR/asi-red.png")
 elif [ -n "$VITE_RUNNING" ]; then
-  echo "👾 $AUDIO_ICON"
+  ICON_B64=$(icon_b64 "$ICON_DIR/asi.png")
 else
-  echo "⚡ $AUDIO_ICON | color=orange"
+  ICON_B64=$(icon_b64 "$ICON_DIR/asi-amber.png")
+fi
+
+if [ -n "$ICON_B64" ]; then
+  echo "$AUDIO_ICON | image=$ICON_B64"
+else
+  # Fallback: lieber das alte Emoji als eine leere Menueleiste.
+  echo "👾 $AUDIO_ICON"
 fi
 
 

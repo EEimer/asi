@@ -15,12 +15,42 @@ export interface YouTubeVideo {
 
 export type SummaryStatus = 'processing' | 'done' | 'error'
 
-/** Detailgrad: `short` = nur die Kernaussagen, `long` = die volle Struktur. */
-export type SummaryDetail = 'short' | 'long'
+/**
+ * Detailgrad: `short` = nur die Kernaussagen, `medium` = der Normalfall,
+ * `long` = die volle Struktur. `medium` kam später dazu, deshalb steht in
+ * Altbeständen der Datenbank weiterhin `short` oder `long`.
+ */
+export type SummaryDetail = 'short' | 'medium' | 'long'
+
+export const SUMMARY_DETAIL_VALUES: SummaryDetail[] = ['short', 'medium', 'long']
 
 export const SUMMARY_DETAIL_LABELS: Record<SummaryDetail, string> = {
   short: 'Kurz',
+  medium: 'Mittel',
   long: 'Lang',
+}
+
+/** Einzeiler unter der Auswahl – sagt, was der Detailgrad konkret liefert. */
+export const SUMMARY_DETAIL_HINTS: Record<SummaryDetail, string> = {
+  short: 'Nur die 2-3 Kernaussagen',
+  medium: 'Max. 6 Punkte, ein knapper Satz je Punkt',
+  long: 'Ausführlich mit allen Details',
+}
+
+/**
+ * Ein Custom Prompt ersetzt den Standard-Prompt komplett – der Detailgrad kann
+ * dort also nicht über die Prompt-Auswahl wirken. Stattdessen hängt der Server
+ * diese Zeile an den Custom Prompt an.
+ */
+export const SUMMARY_DETAIL_LENGTH_HINTS: Record<SummaryDetail, string> = {
+  short: 'Länge: sehr knapp. Nur die 2-3 wichtigsten Aussagen, ein Satz pro Punkt, keine Details.',
+  medium: 'Länge: knapp. Maximal 6 Punkte, ein Satz je Punkt, höchstens 20 Wörter. Telegrammstil, keine Zuschreibungen ("laut Sprecher"), kein Konjunktiv.',
+  long: 'Länge: ausführlich. Alle relevanten Details, Beispiele und Nebenstränge.',
+}
+
+/** Aus der Datenbank oder vom Client kommender Wert – Unbekanntes fällt auf `long` zurück. */
+export function normalizeDetail(value: unknown): SummaryDetail {
+  return value === 'short' || value === 'medium' ? value : 'long'
 }
 
 export interface Summary {
@@ -77,6 +107,9 @@ export interface Prediction {
   ifCases: string
   priceTarget: string
   createdAt: string
+  /** Nur im Katalog (/predictions/all) gesetzt: false = aus der Zusammenfassung
+      abgeleitet, aber noch nicht in die Glaskugel übernommen. */
+  saved?: boolean
 }
 
 /** Aus dem Zusammenfassungs-Text geparste Prognose — Rohform vor dem Insert. */
@@ -149,6 +182,8 @@ export interface Settings {
   summaryPrompt: string
   /** Prompt für die Kurzversion — nur die 2-3 Kernaussagen. */
   shortSummaryPrompt: string
+  /** Prompt für die Mittelversion — der Normalfall zwischen Kurz und Lang. */
+  mediumSummaryPrompt: string
   defaultLang: string
   cookieBrowser: string
   openaiModel: string
@@ -167,6 +202,25 @@ export interface CustomPrompt {
   text: string
   createdAt: string
   updatedAt: string
+}
+
+/** Woechentliche Kopie der Wealth-Datenbank in den Documents-Ordner (server/services/wealthBackup.ts). */
+export interface WealthBackupStatus {
+  configured: boolean
+  directory: string
+  lastRunAt: string | null
+  lastFilename: string | null
+  fileCount: number
+  totalBytes: number
+  due: boolean
+}
+
+export interface WealthBackupResult {
+  ran: boolean
+  filename?: string
+  bytes?: number
+  removed?: string[]
+  skippedReason?: 'not-due' | 'not-configured' | 'in-progress'
 }
 
 export interface XSummary {
@@ -221,7 +275,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { value: 'claude-opus-5', label: 'Claude Opus 5', short: 'Opus 5', provider: 'anthropic', tier: 'mittel', hint: 'Stark bei langen Transkripten' },
   // gpt-5.5-pro & Co. laufen nur über die Responses-API, nicht über
   // /v1/chat/completions — daher hier die neueste Chat-fähige Generation.
-  { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', short: '5.6 Terra', provider: 'openai', tier: 'beste', hint: 'Neueste OpenAI-Generation (Varianten: luna/sol/terra)' },
+  { value: 'gpt-6-sol', label: 'GPT-6 Sol', short: '6 Sol', provider: 'openai', tier: 'beste', hint: 'Neueste OpenAI-Generation (Varianten: luna/sol/terra)' },
   { value: 'claude-fable-5', label: 'Claude Fable 5', short: 'Fable 5', provider: 'anthropic', tier: 'beste', hint: 'Anthropics stärkstes Modell, teuerste Option' },
 ]
 
@@ -239,6 +293,7 @@ export const LEGACY_MODEL_LABELS: Record<string, string> = {
   'gpt-5.1': 'GPT-5.1',
   'gpt-5.2': 'GPT-5.2',
   'gpt-5.4': 'GPT-5.4',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
   'claude-haiku-4-5': 'Haiku 4.5',
   'claude-sonnet-4-6': 'Sonnet 4.6',
   'claude-opus-4-6': 'Opus 4.6',
@@ -296,6 +351,64 @@ Wenn keine Prognosen genannt werden: Abschnitt weglassen.
 - Antworte immer auf Deutsch
 - So kurz wie möglich, so ausführlich wie nötig
 - Keine Einleitung außer den Metadaten
+
+Transkript:
+`,
+  mediumSummaryPrompt: `Du bist ein Experte für dichte Zusammenfassungen von YouTube-Videos.
+Schreibe im Telegrammstil. Der Leser will die Information, nicht den Text.
+
+## Metadaten (immer zuerst ausgeben)
+- **Hauptsprecher / Interviewpartner:** [Name der Person, die die inhaltlichen Aussagen trifft – NICHT der Kanalinhaber, falls es ein Interview ist. Falls unklar, weglassen.]
+
+---
+
+## Kernaussagen
+- Maximal 6 Punkte, die wichtigste Aussage zuerst
+- EIN Satz pro Punkt, höchstens 20 Wörter. Kein zweiter Satz, kein Nachsatz, kein Semikolon als Notausgang.
+- Aufbau: Thema, Doppelpunkt, Aussage. Zahlen und Marken gehören rein, Herleitungen nicht.
+- Keine Zuschreibungen: kein "laut Sprecher", "aus seiner Sicht", "er empfiehlt". Dass es die Aussage des Videos ist, weiß der Leser.
+- Kein Konjunktiv, keine Abschwächungen ("sei relevant", "könnte möglicherweise")
+- Im Zweifel den Punkt streichen statt ihn zu kürzen
+- Werbung, Sponsoring und Off-Topic werden ignoriert
+
+So nicht – zwei Sätze, Zuschreibung, Konjunktiv:
+- Bitcoin steht an einem Entscheidungspunkt: Ein Rücksetzer in die Zone von 69.000 bis 72.500 US-Dollar wäre laut Analyse eine attraktive Dip-Buying-Region, sofern dort Spot-Käufe und Handelsvolumen wieder sichtbar anziehen. Besonders 72.400, 69.000 sowie die 200-Tage-EMAs bei rund 72.000 und 69.200 US-Dollar seien relevante Marken.
+
+So ja:
+- Bitcoin-Kaufzone: 69.000–72.500 USD, Marken 72.400/69.000, 200-Tage-EMA 72.000/69.200 – nur bei anziehendem Spot-Volumen.
+
+---
+
+## Erwähnenswertes
+- [Was am Rande hängen bleibt: überraschende Zahlen, genannte Quellen, Buch- oder Tool-Empfehlungen]
+- Maximal 3 Punkte, je höchstens 15 Wörter
+- Wenn nichts Erwähnenswertes vorkommt: Abschnitt weglassen
+
+---
+
+## Assets & Prognosen
+Falls im Video konkrete Assets, Prognosen oder Kursziele genannt werden, gib diese als JSON zurück:
+
+\`\`\`json
+[
+  {
+    "name": "Bitcoin",
+    "direction": "long",
+    "if_cases": "Falls Fed Zinsen senkt",
+    "price_target": "$120.000"
+  }
+]
+\`\`\`
+
+Relevante Assets: S&P 500, MSCI World, Bitcoin, Ethereum, Solana, Tesla, Amazon, Gold, Silber – sowie alle anderen explizit genannten.
+Wenn keine Prognosen genannt werden: Abschnitt weglassen.
+
+---
+
+## Sprache & Regeln
+- Antworte immer auf Deutsch
+- Nur Bullet Points, kein Fließtext, keine Einleitung außer den Metadaten, kein Fazit
+- Der Punkt muss ohne das Video verständlich sein – aber knapp, nicht höflich
 
 Transkript:
 `,

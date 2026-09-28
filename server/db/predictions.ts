@@ -1,10 +1,15 @@
 import db from './database'
 import type { Prediction, PredictionRow } from '../../shared/types'
 
-const LIST_QUERY = `SELECT id, summary_id AS summaryId, video_title AS videoTitle, video_url AS videoUrl, channel_name AS channelName, author, asset_name AS assetName, direction, if_cases AS ifCases, price_target AS priceTarget, replace(created_at,' ','T')||'Z' AS createdAt FROM predictions ORDER BY created_at DESC`
+const SELECT_FROM = `SELECT id, summary_id AS summaryId, video_title AS videoTitle, video_url AS videoUrl, channel_name AS channelName, author, asset_name AS assetName, direction, if_cases AS ifCases, price_target AS priceTarget, replace(created_at,' ','T')||'Z' AS createdAt FROM predictions`
 
-export function getAllPredictions(): Prediction[] {
-  return db.query(LIST_QUERY).all() as Prediction[]
+const LIST_QUERY = `${SELECT_FROM} ORDER BY created_at DESC`
+const LIST_SINCE_QUERY = `${SELECT_FROM} WHERE created_at >= datetime('now', ?) ORDER BY created_at DESC`
+
+/** `sinceMonths` begrenzt auf die letzten N Monate; ohne Wert kommt alles. */
+export function getAllPredictions(sinceMonths?: number): Prediction[] {
+  if (!sinceMonths) return db.query(LIST_QUERY).all() as Prediction[]
+  return db.query(LIST_SINCE_QUERY).all(`-${sinceMonths} months`) as Prediction[]
 }
 
 export function insertPredictions(summaryId: string, videoTitle: string, videoUrl: string, channelName: string, author: string, rows: PredictionRow[]) {

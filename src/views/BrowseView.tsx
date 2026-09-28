@@ -1,18 +1,16 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings, fetchSummary } from '../api/endpoints'
+import { fetchYouTubeFeed, refreshYouTubeFeed, createSummary, retrySummary, fetchSummaries, fetchSettings, updateSettings } from '../api/endpoints'
 import type { SummaryDetail, YouTubeVideo } from '../../shared/types'
-import { SUMMARY_DETAIL_LABELS } from '../../shared/types'
-import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, Play, Send, Check, Zap } from 'lucide-react'
+import { SUMMARY_DETAIL_HINTS, SUMMARY_DETAIL_LABELS, normalizeDetail } from '../../shared/types'
+import { Loader2, RefreshCw, ExternalLink, Sparkles, AlertCircle, Eye, EyeOff, ScrollText, Zap } from 'lucide-react'
 import { SegmentedControl } from '../components/SegmentedControl'
-import { useTtsPlayback, type TtsTarget } from '../hooks/useTtsPlayback'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
 import { POLL_INTERVAL_MS, appendUnique } from '../lib/constants'
 import { useSummaryLaunch } from '../store/summaryLaunchStore'
 import { Badge, Button, Card, buttonClasses, SkeletonList } from '../components/ui'
 
 const PAGE_SIZE = 30
-type PendingTtsMode = 'play' | 'telegram'
 
 function timeAgo(ts: number): string {
   const totalSeconds = Math.max(0, Math.floor(Date.now() / 1000 - ts))
@@ -53,17 +51,13 @@ export default function BrowseView() {
   const [processing, setProcessing] = useState<Map<string, string>>(new Map())
   const [summarized, setSummarized] = useState<Map<string, string>>(new Map())
   const [failed, setFailed] = useState<Map<string, string>>(new Map())
-  /** summaryId -> Detailgrad, damit die Karte "Kurz"/"Lang" anzeigen kann. */
+  /** summaryId -> Detailgrad, damit die Karte "Kurz"/"Mittel"/"Lang" anzeigen kann. */
   const [detailById, setDetailById] = useState<Map<string, SummaryDetail>>(new Map())
   const sentinelRef = useRef<HTMLDivElement>(null)
   const videosLenRef = useRef(0)
   videosLenRef.current = videos.length
   const [channelFilterMode, setChannelFilterMode] = useState<'filtered' | 'all'>('filtered')
   const [blockedChannels, setBlockedChannels] = useState<string[]>([])
-  const tts = useTtsPlayback()
-  const [pendingTtsByVideo, setPendingTtsByVideo] = useState<Record<string, PendingTtsMode>>({})
-  const [runningTtsByVideo, setRunningTtsByVideo] = useState<Record<string, boolean>>({})
-  const [ttsErrors, setTtsErrors] = useState<Record<string, string>>({})
   const showAllChannels = channelFilterMode === 'all'
   const blockedKeys = new Set(blockedChannels.map(channelKey))
 
@@ -74,7 +68,7 @@ export default function BrowseView() {
       const errMap = new Map<string, string>()
       const detailMap = new Map<string, SummaryDetail>()
       for (const s of all) {
-        detailMap.set(s.id, s.detail === 'short' ? 'short' : 'long')
+        detailMap.set(s.id, normalizeDetail(s.detail))
         if (s.status === 'done') doneMap.set(s.videoId, s.id)
         else if (s.status === 'error') errMap.set(s.videoId, s.id)
       }
@@ -145,94 +139,15 @@ export default function BrowseView() {
     fetchSettings().then(s => setBlockedChannels(s.blockedChannels)).catch(() => {})
   }, [showAllChannels])
 
-  async function runTtsJob(video: YouTubeVideo, summaryId: string, mode: PendingTtsMode) {
-    setRunningTtsByVideo(prev => ({ ...prev, [video.id]: true }))
-    setTtsErrors(prev => {
-      const next = { ...prev }
-      delete next[video.id]
-      return next
-    })
-    try {
-      const summary = await fetchSummary(summaryId)
-      if (!summary.summary) throw new Error('Summary noch nicht verfügbar')
-      const target: TtsTarget = {
-        id: summaryId,
-        title: summary.videoTitle || video.title || 'Summary',
-        text: summary.summary,
-      }
-      /* Fehler werden hier zusätzlich nach Video-ID abgelegt — die Karte in der
-         Liste kennt die Summary-ID nicht, unter der der Hook sie führt. */
-      if (mode === 'telegram') await tts.sendToTelegram(target, tts.defaults)
-      else await tts.generateAndPlay(target, tts.defaults)
-    } catch (e: any) {
-      setTtsErrors(prev => ({ ...prev, [video.id]: e?.message ?? 'TTS fehlgeschlagen' }))
-    } finally {
-      setRunningTtsByVideo(prev => ({ ...prev, [video.id]: false }))
-      setPendingTtsByVideo(prev => {
-        const next = { ...prev }
-        delete next[video.id]
-        return next
-      })
-    }
-  }
-
-  async function queueTtsFlow(video: YouTubeVideo, mode: PendingTtsMode) {
-    setPendingTtsByVideo(prev => ({ ...prev, [video.id]: mode }))
-    setTtsErrors(prev => {
-      const next = { ...prev }
-      delete next[video.id]
-      return next
-    })
-
-    const doneId = summarized.get(video.id)
-    if (doneId) {
-      await runTtsJob(video, doneId, mode)
-      return
-    }
-
-    const failedId = failed.get(video.id)
-    if (failedId) {
-      try {
-        await retrySummary(failedId)
-        setProcessing(prev => new Map(prev).set(video.id, failedId))
-      } catch (e: any) {
-        setTtsErrors(prev => ({ ...prev, [video.id]: e?.message ?? 'Retry fehlgeschlagen' }))
-        setPendingTtsByVideo(prev => {
-          const next = { ...prev }
-          delete next[video.id]
-          return next
-        })
-      }
-      return
-    }
-
-    if (processing.has(video.id)) return
-    try {
-      const result = await createSummary(video.url, { title: video.title, channel: video.channel, thumbnail: video.thumbnail })
-      setProcessing(prev => new Map(prev).set(video.id, result.id))
-    } catch (e: any) {
-      setTtsErrors(prev => ({ ...prev, [video.id]: e?.message ?? 'Summary konnte nicht gestartet werden' }))
-      setPendingTtsByVideo(prev => {
-        const next = { ...prev }
-        delete next[video.id]
-        return next
-      })
-    }
-  }
-
   const loadMore = useCallback(() => { loadFeed(false) }, [loadFeed])
   useInfiniteScroll(sentinelRef, hasMore && !loadingMore, loadMore)
 
-  /* Der Poller laeuft in einem festen 3s-Takt. runTtsJob entsteht bei jedem Render
-     neu; als Dependency wuerde das Intervall staendig neu aufgesetzt und der Takt
-     nie erreicht. Die Ref haelt immer die aktuelle Fassung, ohne den Effekt zu
-     invalidieren. */
-  const runTtsJobRef = useRef(runTtsJob)
-  runTtsJobRef.current = runTtsJob
-
-  // Poll summary status continuously so browse updates without manual refresh.
+  /* Poll summary status continuously so browse updates without manual refresh.
+     Haengt nur am „gibt es ueberhaupt Videos" — an der Liste selbst wuerde jedes
+     Nachladen das Intervall neu aufsetzen und der Takt nie durchlaufen. */
+  const hasVideos = videos.length > 0
   useEffect(() => {
-    if (videos.length === 0) return
+    if (!hasVideos) return
     const interval = setInterval(async () => {
       try {
         const summaries = await fetchSummaries()
@@ -240,7 +155,7 @@ export default function BrowseView() {
         const errorMap = new Map<string, string>()
         const detailMap = new Map<string, SummaryDetail>()
         for (const s of summaries) {
-          detailMap.set(s.id, s.detail === 'short' ? 'short' : 'long')
+          detailMap.set(s.id, normalizeDetail(s.detail))
           if (s.status === 'done') doneMap.set(s.videoId, s.id)
           if (s.status === 'error') errorMap.set(s.videoId, s.id)
         }
@@ -256,33 +171,10 @@ export default function BrowseView() {
           return next
         })
         setFailed(errorMap)
-        try {
-          await tts.refreshIndex()
-        } catch {}
-
-        for (const [videoId, mode] of Object.entries(pendingTtsByVideo)) {
-          if (runningTtsByVideo[videoId]) continue
-          const doneSummaryId = doneMap.get(videoId)
-          if (doneSummaryId) {
-            const video = videos.find(item => item.id === videoId)
-            if (video) {
-              void runTtsJobRef.current(video, doneSummaryId, mode)
-            }
-            continue
-          }
-          if (errorMap.has(videoId)) {
-            setPendingTtsByVideo(prev => {
-              const next = { ...prev }
-              delete next[videoId]
-              return next
-            })
-            setTtsErrors(prev => ({ ...prev, [videoId]: 'Summary fehlgeschlagen - TTS abgebrochen' }))
-          }
-        }
       } catch {}
     }, POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [pendingTtsByVideo, runningTtsByVideo, videos])
+  }, [hasVideos])
 
   async function handleSummarize(video: YouTubeVideo, detail: SummaryDetail) {
     try {
@@ -390,7 +282,6 @@ export default function BrowseView() {
               const isFailed = !doneId && !processingId && !!failedId
               const doneDetail = doneId ? detailById.get(doneId) : undefined
               const processingDetail = processingId ? detailById.get(processingId) : undefined
-              const hasTts = !!(doneId && tts.index[doneId] && Object.keys(tts.index[doneId].variants).length > 0)
               const cardClickable = !!summaryId
               const isBlocked = channelKeysOf(v).some(k => blockedKeys.has(k))
               return (
@@ -430,10 +321,11 @@ export default function BrowseView() {
                     {/* Feste Spaltenbreite: sonst richtet sich die Breite nach dem
                         längsten Label und die Buttons springen von Karte zu Karte. */}
                     <div className="shrink-0 w-56 flex flex-col gap-2 items-stretch" onClick={e => e.stopPropagation()}>
-                      {/* Eine Hierarchie pro Spalte: „Lang" ist die Hauptaktion und
-                          trägt als einzige eine gefüllte Fläche, „Kurz" dieselbe Farbe
-                          eine Stufe leiser. Sekundäres bleibt neutral, Zustände tragen
-                          ihre Semantikfarbe – gleiche Bauform, andere Farbe. */}
+                      {/* Eine Hierarchie pro Spalte: „Zusammenfassen" (= Mittel) ist der
+                          Normalfall und trägt als einzige eine gefüllte Fläche, die beiden
+                          Abweichungen „Kurz" und „Lang" dieselbe Farbe eine Stufe leiser.
+                          Sekundäres bleibt neutral, Zustände tragen ihre Semantikfarbe –
+                          gleiche Bauform, andere Farbe. */}
                       {summaryId && !isProcessing ? (
                         isFailed ? (
                           <>
@@ -457,49 +349,24 @@ export default function BrowseView() {
                           Verarbeite{processingDetail ? ` (${SUMMARY_DETAIL_LABELS[processingDetail].toLowerCase()})` : ''}...
                         </Badge>
                       ) : (
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button size="sm" variant="primary" outline onClick={() => handleSummarize(v, 'short')} title="Kurzfassung — nur die 2-3 Kernaussagen">
-                            <Zap className="w-3.5 h-3.5" /> Kurz
+                        <>
+                          <Button size="sm" variant="primary" block onClick={() => handleSummarize(v, 'medium')} title={`Zusammenfassung — ${SUMMARY_DETAIL_HINTS.medium}`}>
+                            <Sparkles className="w-3.5 h-3.5" /> Zusammenfassen
                           </Button>
-                          <Button size="sm" variant="primary" onClick={() => handleSummarize(v, 'long')} title="Ausführliche Zusammenfassung mit allen Details">
-                            <Sparkles className="w-3.5 h-3.5" /> Lang
-                          </Button>
-                        </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button size="sm" variant="primary" outline onClick={() => handleSummarize(v, 'short')} title={`Kurzfassung — ${SUMMARY_DETAIL_HINTS.short}`}>
+                              <Zap className="w-3.5 h-3.5" /> Kurz
+                            </Button>
+                            <Button size="sm" variant="primary" outline onClick={() => handleSummarize(v, 'long')} title={`Langfassung — ${SUMMARY_DETAIL_HINTS.long}`}>
+                              <ScrollText className="w-3.5 h-3.5" /> Lang
+                            </Button>
+                          </div>
+                        </>
                       )}
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          size="sm"
-                          variant={hasTts ? 'success' : 'cancel'}
-                          outline
-                          onClick={() => { void queueTtsFlow(v, 'play') }}
-                          disabled={!!runningTtsByVideo[v.id]}
-                          title="Summary + TTS erstellen und abspielen"
-                        >
-                          {pendingTtsByVideo[v.id] === 'play' || runningTtsByVideo[v.id]
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : hasTts ? <Check className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                          TTS
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="cancel"
-                          outline
-                          onClick={() => { void queueTtsFlow(v, 'telegram') }}
-                          disabled={!!runningTtsByVideo[v.id]}
-                          title="Summary + TTS erstellen und an Telegram senden"
-                        >
-                          {pendingTtsByVideo[v.id] === 'telegram' || runningTtsByVideo[v.id]
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <Send className="w-3.5 h-3.5" />}
-                          TTS
-                        </Button>
-                      </div>
 
                       <a href={v.url} target="_blank" rel="noopener" className={buttonClasses({ variant: 'accent', outline: true, size: 'sm', block: true })}>
                         <ExternalLink className="w-3.5 h-3.5" /> In YT öffnen
                       </a>
-                      {ttsErrors[v.id] ? <span className="text-[10px] text-danger text-right">{ttsErrors[v.id]}</span> : null}
                     </div>
                   </div>
                 </Card>

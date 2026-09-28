@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Loader2, LinkIcon, Sparkles, Wand2 } from 'lucide-react'
 import type { CustomPrompt, SummaryDetail } from '../../shared/types'
-import { MODEL_OPTIONS, DEFAULT_SETTINGS, SUMMARY_DETAIL_LABELS } from '../../shared/types'
+import { MODEL_OPTIONS, DEFAULT_SETTINGS, SUMMARY_DETAIL_HINTS, SUMMARY_DETAIL_LABELS, SUMMARY_DETAIL_VALUES } from '../../shared/types'
 import { createSummary, fetchCustomPrompts, fetchSettings } from '../api/endpoints'
 import { Modal, ModalFooter } from './Modal'
 import { SegmentedControl } from './SegmentedControl'
@@ -23,7 +23,7 @@ export default function NavSummarizeActions() {
 
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [manualUrl, setManualUrl] = useState('')
-  const [manualDetail, setManualDetail] = useState<SummaryDetail>('long')
+  const [manualDetail, setManualDetail] = useState<SummaryDetail>('medium')
   const [submitting, setSubmitting] = useState(false)
 
   const [customPromptModalOpen, setCustomPromptModalOpen] = useState(false)
@@ -32,6 +32,7 @@ export default function NavSummarizeActions() {
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null)
   const [customPromptUrl, setCustomPromptUrl] = useState('')
   const [customPromptSubmitting, setCustomPromptSubmitting] = useState(false)
+  const [customDetail, setCustomDetail] = useState<SummaryDetail>('medium')
   const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.openaiModel)
 
   async function handleManualUrl() {
@@ -54,6 +55,7 @@ export default function NavSummarizeActions() {
   async function openCustomPromptModal() {
     setCustomPromptUrl('')
     setSelectedPromptId(null)
+    setCustomDetail('medium')
     setCustomPromptModalOpen(true)
     setCustomPromptsLoading(true)
     try {
@@ -75,8 +77,8 @@ export default function NavSummarizeActions() {
 
     setCustomPromptSubmitting(true)
     try {
-      const result = await createSummary(url, undefined, undefined, selectedModel, prompt.text)
-      announce({ videoId: match[1], summaryId: result.id, url })
+      const result = await createSummary(url, undefined, undefined, selectedModel, prompt.text, customDetail)
+      announce({ videoId: match[1], summaryId: result.id, url, detail: customDetail })
       setCustomPromptUrl('')
       setSelectedPromptId(null)
       setCustomPromptModalOpen(false)
@@ -160,6 +162,21 @@ export default function NavSummarizeActions() {
               ))}
             </div>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1.5">Länge</label>
+            <div className="flex items-center justify-between gap-3">
+              {/* Der Custom Prompt bringt seine eigene Struktur mit – die Auswahl
+                  hängt nur eine Längenvorgabe an, sie ersetzt nichts. */}
+              <span className="text-xs text-dim">{SUMMARY_DETAIL_HINTS[customDetail]}</span>
+              <SegmentedControl<SummaryDetail>
+                size="sm"
+                values={SUMMARY_DETAIL_VALUES}
+                labels={SUMMARY_DETAIL_VALUES.map(v => SUMMARY_DETAIL_LABELS[v])}
+                value={customDetail}
+                onChange={setCustomDetail}
+              />
+            </div>
+          </div>
         </div>
         <ModalFooter>
           <Button variant="cancel" outline onClick={() => setCustomPromptModalOpen(false)}>Abbrechen</Button>
@@ -191,11 +208,11 @@ export default function NavSummarizeActions() {
           }}
         />
         <div className="flex items-center justify-between gap-3 mt-3">
-          <span className="text-xs text-muted">{manualDetail === 'short' ? 'Nur die 2-3 Kernaussagen' : 'Ausführlich mit allen Details'}</span>
+          <span className="text-xs text-muted">{SUMMARY_DETAIL_HINTS[manualDetail]}</span>
           <SegmentedControl<SummaryDetail>
             size="sm"
-            values={['short', 'long']}
-            labels={[SUMMARY_DETAIL_LABELS.short, SUMMARY_DETAIL_LABELS.long]}
+            values={SUMMARY_DETAIL_VALUES}
+            labels={SUMMARY_DETAIL_VALUES.map(v => SUMMARY_DETAIL_LABELS[v])}
             value={manualDetail}
             onChange={setManualDetail}
           />

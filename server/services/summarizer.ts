@@ -46,11 +46,11 @@ const MAX_OUTPUT_TOKENS = 4000
 const MAX_OUTPUT_TOKENS_REASONING = 16_000
 
 /**
- * GPT-5 und die o-Reihe verlangen `max_completion_tokens` statt `max_tokens`
- * und akzeptieren nur die Default-Temperature. Beides sonst: HTTP 400.
+ * GPT-5, GPT-6 und die o-Reihe verlangen `max_completion_tokens` statt
+ * `max_tokens` und akzeptieren nur die Default-Temperature. Beides sonst: HTTP 400.
  */
 function isOpenAiReasoningModel(model: string): boolean {
-  return /^(gpt-5|o[1-9])/i.test(model)
+  return /^(gpt-[5-9]|o[1-9])/i.test(model)
 }
 
 /**

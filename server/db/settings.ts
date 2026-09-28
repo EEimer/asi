@@ -4,6 +4,7 @@ import type { Settings } from '../../shared/types'
 const KEY_MAP: Record<string, keyof Settings> = {
   summary_prompt: 'summaryPrompt',
   short_summary_prompt: 'shortSummaryPrompt',
+  medium_summary_prompt: 'mediumSummaryPrompt',
   default_lang: 'defaultLang',
   cookie_browser: 'cookieBrowser',
   openai_model: 'openaiModel',

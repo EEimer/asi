@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
-import { fetchSettings, updateSettings, resetTable, fetchCustomPrompts, createCustomPromptApi, updateCustomPromptApi, deleteCustomPromptApi } from '../api/endpoints'
-import type { CustomPrompt, Settings, TtsModel, TtsVoice, ModelTier } from '../../shared/types'
+import { useEffect, useState, type ReactNode } from 'react'
+import { fetchSettings, updateSettings, resetTable, fetchCustomPrompts, createCustomPromptApi, updateCustomPromptApi, deleteCustomPromptApi, fetchWealthBackupStatus, runWealthBackupNow } from '../api/endpoints'
+import type { CustomPrompt, Settings, TtsModel, TtsVoice, ModelTier, WealthBackupStatus } from '../../shared/types'
 import { DEFAULT_SETTINGS, MODEL_OPTIONS, MODEL_TIER_LABELS, LEGACY_MODEL_LABELS } from '../../shared/types'
 import { ttsVoiceOptions, reconcileConfigForModel } from '../../shared/tts'
-import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react'
+import { Save, RotateCcw, Loader2, Check, Plus, X, Trash2, AlertTriangle, Pencil, Sun, Moon, DatabaseBackup } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
 import { SegmentedControl } from '../components/SegmentedControl'
@@ -46,6 +46,17 @@ const DANGER_LABELS: Record<string, { title: string; desc: string; confirm: stri
   settings: { title: 'Einstellungen zurücksetzen', desc: 'Alle Einstellungen werden auf Standardwerte zurückgesetzt. Prompt, blockierte Kanäle, Modell etc. gehen verloren.', confirm: 'Zurücksetzen' },
 }
 
+const formatBytes = (bytes: number): string => bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`
+const formatDateTimeDe = (iso: string): string => new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+/** Beschreibungszeile der Backup-Karte: Zustand, Ablageort, letzter Lauf. */
+function backupDescription(status: WealthBackupStatus | null): ReactNode {
+  if (!status) return 'Wird geladen …'
+  if (!status.configured) return <>Ohne <code>WEALTH_DB_TOKEN</code> in der <code>.env</code> holt ASI nichts — es ist derselbe Token wie <code>DB_PULL_TOKEN</code> in wealth.</>
+  const last = status.lastRunAt ? `Zuletzt ${formatDateTimeDe(status.lastRunAt)}` : 'Noch nie gelaufen'
+  return <>Läuft von selbst beim ersten Öffnen in einer neuen Woche. {last} · {status.fileCount} {status.fileCount === 1 ? 'Datei' : 'Dateien'} ({formatBytes(status.totalBytes)}) in <code>{status.directory}</code></>
+}
+
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [lastSavedSettings, setLastSavedSettings] = useState<Settings>(DEFAULT_SETTINGS)
@@ -65,9 +76,28 @@ export default function SettingsView() {
      dieses Geräts, nicht des Accounts, und muss vor dem ersten Paint feststehen. */
   const { theme, setTheme } = useTheme()
 
+  const [backupStatus, setBackupStatus] = useState<WealthBackupStatus | null>(null)
+  const [backupRunning, setBackupRunning] = useState(false)
+
   useEffect(() => {
     fetchCustomPrompts().then(setCustomPrompts).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    fetchWealthBackupStatus().then(setBackupStatus).catch(console.error)
+  }, [])
+
+  async function handleWealthBackup() {
+    setBackupRunning(true)
+    try {
+      const result = await runWealthBackupNow()
+      const removed = result.removed?.length ? `, ${result.removed.length} alte entfernt` : ''
+      addToast(`Datenbank-Backup gespeichert: ${result.filename}${removed}`, 'success', 5000)
+      setBackupStatus(await fetchWealthBackupStatus())
+    } catch (e: any) {
+      addToast(`Backup fehlgeschlagen: ${e.message}`, 'error', 8000)
+    } finally { setBackupRunning(false) }
+  }
 
   useEffect(() => {
     fetchSettings()
@@ -201,9 +231,28 @@ export default function SettingsView() {
         </Card>
 
         <Card className="p-5">
+          <SettingRow
+            label={<span className="flex items-center gap-1.5"><DatabaseBackup className="w-4 h-4" />Wealth-Datenbank sichern</span>}
+            description={backupDescription(backupStatus)}
+            align="start"
+          >
+            <Button variant="primary" outline size="sm" onClick={handleWealthBackup} loading={backupRunning} disabled={backupStatus != null && !backupStatus.configured} className="shrink-0">
+              Jetzt erstellen
+            </Button>
+          </SettingRow>
+        </Card>
+
+        <Card className="p-5">
           <label className="block text-sm font-medium text-content mb-2">Summary Prompt (Lang)</label>
           <p className="text-xs text-muted mb-3">Dieser Prompt wird vor jedes Transkript gesetzt und an OpenAI geschickt. Das Transkript wird automatisch ans Ende angehängt.</p>
           <Textarea value={settings.summaryPrompt} onChange={e => setSettings(s => ({ ...s, summaryPrompt: e.target.value }))}
+            rows={10} className="resize-y font-mono" />
+        </Card>
+
+        <Card className="p-5">
+          <label className="block text-sm font-medium text-content mb-2">Summary Prompt (Mittel)</label>
+          <p className="text-xs text-muted mb-3">Wird für den "Zusammenfassen"-Button verwendet — der Normalfall zwischen Kurz und Lang.</p>
+          <Textarea value={settings.mediumSummaryPrompt} onChange={e => setSettings(s => ({ ...s, mediumSummaryPrompt: e.target.value }))}
             rows={10} className="resize-y font-mono" />
         </Card>
 

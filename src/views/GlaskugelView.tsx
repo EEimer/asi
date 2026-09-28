@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useDeferredValue, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchPredictions, deletePrediction, addManualPrediction } from '../api/endpoints'
+import { fetchPredictions, fetchPredictionCatalog, deletePrediction, addManualPrediction, addPredictions } from '../api/endpoints'
 import type { Prediction } from '../../shared/types'
 import { Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2, Plus } from 'lucide-react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { Modal, ModalFooter } from '../components/Modal'
+import { SegmentedControl } from '../components/SegmentedControl'
+import { useToast } from '../store/toastStore'
 import { Badge, Button, Card, Input, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableHeaderRow, TableRow, microLabelClass } from '../components/ui'
 
 type DirectionVariant = 'success' | 'danger' | 'secondary'
@@ -24,17 +26,67 @@ const DIRECTIONS: { value: string; label: string; variant: DirectionVariant }[] 
 
 const EMPTY_FORM = { asset: '', direction: 'long', ifCases: '', priceTarget: '', author: '', videoTitle: '' }
 
+/** `saved` = nur Übernommenes, `all` = plus alles, was in Zusammenfassungen steckt. */
+type Scope = 'saved' | 'all'
+
+/** Zeitraum im Alle-Modus – Monate oder der ganze Bestand. */
+type Range = '3' | '6' | 'all'
+const RANGE_MONTHS: Record<Range, number | undefined> = { 3: 3, 6: 6, all: undefined }
+
+/** Max. Zeilen im Alle-Modus – darüber hilft nur noch der Filter. */
+const ALL_RENDER_LIMIT = 300
+
+/** Gleiche Prognose? Asset + Richtung reichen – das Kursziel wird oft editiert. */
+const sameRow = (a: Prediction, b: Prediction) =>
+  a.assetName.trim().toLowerCase() === b.assetName.trim().toLowerCase() &&
+  a.direction.trim().toLowerCase() === b.direction.trim().toLowerCase()
+
 export default function GlaskugelView() {
   const [predictions, setPredictions] = useState<Prediction[]>([])
+  const [catalog, setCatalog] = useState<Prediction[] | null>(null)
+  const [scope, setScope] = useState<Scope>('saved')
+  const [range, setRange] = useState<Range>('3')
   const [loading, setLoading] = useState(true)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState('')
+  const [adding, setAdding] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const { addToast } = useToast()
 
   useEffect(() => { load() }, [])
+
+  /* Der Katalog parst serverseitig jede Zusammenfassung neu – deshalb nur auf
+     Anforderung laden (Wechsel auf "Alle", Zeitraumwechsel, Wiederholen) und
+     danach im State behalten. Bewusst kein useEffect: dessen Cleanup verwarf
+     beim Zustandswechsel loading=true genau die Antwort, auf die er wartete. */
+  async function loadCatalog(r: Range) {
+    setCatalogLoading(true)
+    setCatalogError('')
+    try {
+      setCatalog(await fetchPredictionCatalog(RANGE_MONTHS[r]))
+    } catch (e: any) {
+      console.error(e)
+      setCatalog(null)
+      setCatalogError(e?.message ?? 'Laden fehlgeschlagen')
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
+
+  function handleScope(next: Scope) {
+    setScope(next)
+    if (next === 'all' && !catalog && !catalogLoading) loadCatalog(range)
+  }
+
+  function handleRange(next: Range) {
+    setRange(next)
+    loadCatalog(next)
+  }
 
   async function load() {
     try { setPredictions(await fetchPredictions()) } catch (e) { console.error(e) }
@@ -44,7 +96,37 @@ export default function GlaskugelView() {
   async function handleDelete(id: string) {
     await deletePrediction(id)
     setPredictions(prev => prev.filter(p => p.id !== id))
+    setCatalog(prev => prev?.filter(p => p.id !== id) ?? null)
     setDeleteTarget(null)
+  }
+
+  /* Übernimmt eine abgeleitete Zeile in die Glaskugel. Die Zeile bleibt an Ort
+     und Stelle stehen und wird nur als übernommen markiert – ein Neuladen des
+     Katalogs würde die Liste unter dem Klick wegspringen lassen. */
+  async function handleAdopt(p: Prediction) {
+    setAdding(p.id)
+    try {
+      await addPredictions({
+        summaryId: p.summaryId,
+        videoTitle: p.videoTitle,
+        videoUrl: p.videoUrl,
+        channelName: p.channelName,
+        author: p.author,
+        predictions: [{ name: p.assetName, direction: p.direction, if_cases: p.ifCases, price_target: p.priceTarget }],
+      })
+      const fresh = await fetchPredictions()
+      setPredictions(fresh)
+      /* Die abgeleitete ID ist nur ein Platzhalter – für den Löschen-Button muss
+         die echte aus der Datenbank nachgezogen werden. Datum bleibt das des
+         Videos, sonst springt die Zeile in eine andere Datumsgruppe. */
+      const match = fresh.find(r => r.summaryId === p.summaryId && sameRow(r, p))
+      setCatalog(prev => prev?.map(row => (row.id === p.id ? { ...row, id: match?.id ?? row.id, saved: true } : row)) ?? null)
+      addToast('Zur Glaskugel hinzugefügt', 'success', 2200)
+    } catch (e: any) {
+      addToast(`Fehler: ${e.message}`, 'error', 5000)
+    } finally {
+      setAdding(null)
+    }
   }
 
   async function handleSave() {
@@ -70,15 +152,25 @@ export default function GlaskugelView() {
     }
   }
 
-  const filtered = predictions.filter(p => {
-    if (!filter) return true
-    const q = filter.toLowerCase()
+  const rows = scope === 'all' ? (catalog ?? []) : predictions
+  /* Im Alle-Modus hängen an jedem Tastendruck über tausend Zeilen. Der Deferred
+     Value lässt React die Eingabe sofort zeichnen und die Liste hinterherlaufen. */
+  const query = useDeferredValue(filter)
+  const filtered = rows.filter(p => {
+    if (!query) return true
+    const q = query.toLowerCase()
     return p.assetName.toLowerCase().includes(q) || p.channelName.toLowerCase().includes(q) || p.direction.toLowerCase().includes(q) || (p.author ?? '').toLowerCase().includes(q) || (p.ifCases ?? '').toLowerCase().includes(q)
   })
 
+  /* "Alle" sind mehrere tausend Zeilen – ungebremst würde die Liste bei jedem
+     Tastendruck im Filter komplett neu rendern. Der Deckel fällt nur im
+     Alle-Modus an, die übernommenen Prognosen bleiben immer vollständig. */
+  const truncated = scope === 'all' && filtered.length > ALL_RENDER_LIMIT
+  const visible = truncated ? filtered.slice(0, ALL_RENDER_LIMIT) : filtered
+
   const grouped: { date: string; label: string; items: Prediction[] }[] = []
   let lastDate = ''
-  for (const p of filtered) {
+  for (const p of visible) {
     const d = new Date(p.createdAt)
     const key = isNaN(d.getTime()) ? 'Unbekannt' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     if (key !== lastDate) {
@@ -95,8 +187,28 @@ export default function GlaskugelView() {
     <div>
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-content">Glaskugel</h2>
-        <span className="text-xs text-dim">{predictions.length} Prognosen</span>
-        <Button size="sm" className="ml-auto" onClick={() => { setShowAdd(true); setForm(EMPTY_FORM); setFormError('') }}>
+        <span className="text-xs text-dim">
+          {rows.length} Prognosen{scope === 'all' && catalog ? ` · ${catalog.filter(p => !p.saved).length} nicht übernommen` : ''}
+        </span>
+        {scope === 'all' && (
+          <SegmentedControl<Range>
+            size="sm"
+            className="ml-auto"
+            values={['3', '6', 'all']}
+            labels={['3 Mon.', '6 Mon.', 'Alle']}
+            value={range}
+            onChange={handleRange}
+          />
+        )}
+        <SegmentedControl<Scope>
+          size="sm"
+          className={scope === 'all' ? undefined : 'ml-auto'}
+          values={['saved', 'all']}
+          labels={['Hinzugefügt', 'Alle']}
+          value={scope}
+          onChange={handleScope}
+        />
+        <Button size="sm" onClick={() => { setShowAdd(true); setForm(EMPTY_FORM); setFormError('') }}>
           <Plus className="w-4 h-4" /> Manuell anlegen
         </Button>
       </div>
@@ -104,7 +216,15 @@ export default function GlaskugelView() {
       <Input type="text" placeholder="Filtern nach Asset, Kanal, Richtung..." value={filter} onChange={e => setFilter(e.target.value)}
         className="mb-4" />
 
-      {predictions.length === 0 ? (
+      {scope === 'all' && catalogError ? (
+        <div className="flex flex-col items-center justify-center py-20 text-dim gap-3">
+          <p className="text-sm">Alle Prognosen konnten nicht geladen werden</p>
+          <p className="text-xs">{catalogError}</p>
+          <Button size="sm" variant="cancel" outline onClick={() => loadCatalog(range)}>Erneut versuchen</Button>
+        </div>
+      ) : scope === 'all' && catalogLoading ? (
+        <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+      ) : rows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-dim">
           <p className="text-sm mb-2">Noch keine Prognosen</p>
           <p className="text-xs">Fasse Videos zusammen und füge Prognosen über die Zusammenfassung hinzu</p>
@@ -124,10 +244,13 @@ export default function GlaskugelView() {
             </TableHeader>
             <TableBody>
               {grouped.map(group => (
-                <>{/* Fragment with key on the separator row */}
+                /* Key gehört an das Fragment, nicht an die Trennerzeile – sonst
+                   sieht React eine Liste ohne Keys und baut bei jedem Filter-
+                   Tastendruck alle Gruppen neu auf. */
+                <Fragment key={group.date}>
                   {/* Datums-Trenner: kein TableRow – er ist keine Datenzeile und
                       soll weder Hover noch Zeilentrenner tragen. */}
-                  <tr key={`sep-${group.date}`} className="border-t border-surfaceBorderSoft bg-rowHover/50">
+                  <tr className="border-t border-surfaceBorderSoft bg-rowHover/50">
                     <td colSpan={6} className="px-4 py-2">
                       <span className={microLabelClass}>{group.label}</span>
                     </td>
@@ -136,9 +259,18 @@ export default function GlaskugelView() {
                     const ds = directionStyle(p.direction)
                     const DirIcon = ds.icon
                     const hasAuthor = !!p.author && !/^(nicht angegeben|unbekannt|unknown|n\/a|-|–)$/i.test(p.author.trim())
+                    /* Im "Alle"-Modus stehen übernommene und nur abgeleitete Zeilen
+                       nebeneinander – ohne Marker wäre nicht erkennbar, was davon
+                       wirklich in der Glaskugel liegt. */
+                    const isDerived = p.saved === false
                     return (
                       <TableRow key={p.id}>
-                        <TableCell className="font-medium text-content">{p.assetName}</TableCell>
+                        <TableCell className={isDerived ? 'font-medium text-muted' : 'font-medium text-content'}>
+                          <span className="flex items-center gap-2">
+                            {p.assetName}
+                            {isDerived && <span className="text-[10px] uppercase tracking-wide text-dim border border-surfaceBorder rounded px-1 py-px shrink-0">neu</span>}
+                          </span>
+                        </TableCell>
                         <TableCell>
                           <Badge variant={ds.variant}>
                             <DirIcon className="w-3 h-3 shrink-0" /> {p.direction}
@@ -165,18 +297,31 @@ export default function GlaskugelView() {
                           <div className="text-xs text-dim truncate max-w-[180px]" title={p.channelName}>{p.channelName}</div>
                         </TableCell>
                         <TableCell className="w-10 px-2 text-center">
-                          <Button size="xs" variant="ghost" iconOnly onClick={() => setDeleteTarget(p.id)} className="text-dim hoverable:text-danger" title="Löschen">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
+                          {isDerived ? (
+                            <Button size="xs" variant="ghost" iconOnly loading={adding === p.id} disabled={adding === p.id}
+                              onClick={() => handleAdopt(p)} className="text-dim hoverable:text-primary" title="Zur Glaskugel hinzufügen">
+                              <Plus className="w-3.5 h-3.5" />
+                            </Button>
+                          ) : (
+                            <Button size="xs" variant="ghost" iconOnly onClick={() => setDeleteTarget(p.id)} className="text-dim hoverable:text-danger" title="Löschen">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     )
                   })}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>
         </Card>
+      )}
+
+      {truncated && (
+        <p className="text-xs text-dim mt-3 text-center">
+          {ALL_RENDER_LIMIT} von {filtered.length} Treffern angezeigt – grenze mit dem Filter weiter ein.
+        </p>
       )}
 
       <ConfirmModal

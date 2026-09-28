@@ -5,6 +5,7 @@ import { getAllNotes, createNote, updateNote, markNoteDone, deleteNote, deleteAl
 import { getAllCustomPrompts, createCustomPrompt, updateCustomPrompt, deleteCustomPrompt } from './db/customPrompts'
 import { getAllPredictions, insertPredictions, insertManualPrediction, deletePrediction, deletePredictionsBySummary, deleteAllPredictions } from './db/predictions'
 import { extractSummaryMeta } from './services/tableParser'
+import { getPredictionCatalog } from './services/predictionCatalog'
 import { getSettings, updateSettings, resetSettings } from './db/settings'
 import { fetchSubscriptionFeed, invalidateFeedCache, fetchVideoMeta, downloadSubtitles, extractVideoId } from './services/youtube'
 import { fetchXMeta, fetchXContent, extractXId } from './services/xcom'
@@ -15,7 +16,8 @@ import { loadSettings } from './config'
 import { clearAllTts, deleteTtsBySummary, ensureTtsStorage, getOrGenerateTts, getTtsIndex, resolveTtsFilePath } from './services/tts'
 import { sendAudioToTelegram } from './services/telegram'
 import { setApiConcurrency } from './services/retry'
-import { DEFAULT_SETTINGS, type ChatMessage, type ProcessingEvent, type SummaryDetail, type TtsModel, type TtsVoice } from '../shared/types'
+import { getWealthBackupStatus, runWealthBackup, runWealthBackupIfDue } from './services/wealthBackup'
+import { DEFAULT_SETTINGS, SUMMARY_DETAIL_LABELS, SUMMARY_DETAIL_LENGTH_HINTS, normalizeDetail, type ChatMessage, type ProcessingEvent, type Settings, type SummaryDetail, type TtsModel, type TtsVoice } from '../shared/types'
 import { existsSync } from 'node:fs'
 
 const port = Number(process.env.PORT ?? 8788)
@@ -66,6 +68,29 @@ async function processXSummary(id: string, tweetUrl: string, model: string) {
   }
 }
 
+/** Welcher gespeicherte Prompt gehört zu welchem Detailgrad. */
+const DETAIL_PROMPTS: Record<SummaryDetail, (s: Settings) => string> = {
+  short: s => s.shortSummaryPrompt,
+  medium: s => s.mediumSummaryPrompt,
+  long: s => s.summaryPrompt,
+}
+
+/**
+ * Ein Custom Prompt ersetzt den Standard-Prompt komplett – der Detailgrad wirkt
+ * dort nur noch als angehängte Längenvorgabe. Die muss vor das abschließende
+ * „Transkript:" rutschen: der Summarizer schneidet diesen Marker nur ab, wenn er
+ * wirklich am Ende steht.
+ */
+function withLengthHint(prompt: string, detail: SummaryDetail): string {
+  const hint = SUMMARY_DETAIL_LENGTH_HINTS[detail]
+  const trimmed = prompt.trimEnd()
+  const marker = trimmed.match(/\n?Transkript:\s*$/)
+  if (marker) {
+    return `${trimmed.slice(0, marker.index).trimEnd()}\n\n${hint}\n\nTranskript:\n`
+  }
+  return `${trimmed}\n\n${hint}\n`
+}
+
 async function processSummary(id: string, videoUrl: string, lang: string, model: string, knownTitle: string, knownChannel: string, customPrompt?: string, detail: SummaryDetail = 'long') {
   const label = knownTitle || videoUrl
   try {
@@ -85,9 +110,10 @@ async function processSummary(id: string, videoUrl: string, lang: string, model:
     }
 
     const settings = loadSettings()
-    // Ein Custom Prompt sticht den Detailgrad — er bringt seine eigene Struktur mit.
-    const prompt = customPrompt ?? (detail === 'short' ? settings.shortSummaryPrompt : settings.summaryPrompt)
-    const detailLabel = detail === 'short' ? 'kurz' : 'lang'
+    // Ein Custom Prompt bringt seine eigene Struktur mit und ersetzt den Standard-Prompt
+    // komplett. Der Detailgrad kann dort nur noch als Längenvorgabe hinten anhängen.
+    const prompt = customPrompt ? withLengthHint(customPrompt, detail) : DETAIL_PROMPTS[detail](settings)
+    const detailLabel = SUMMARY_DETAIL_LABELS[detail].toLowerCase()
     emitStep(id, title, 'summarizing', `KI-Zusammenfassung läuft (${model}, ${detailLabel})...`)
     const summary = await summarizeTranscript(text, model, (msg) => {
       emitStep(id, title, 'summarizing', msg)
@@ -147,6 +173,7 @@ new Elysia()
   }, { body: t.Object({
     summaryPrompt: t.Optional(t.String()),
     shortSummaryPrompt: t.Optional(t.String()),
+    mediumSummaryPrompt: t.Optional(t.String()),
     defaultLang: t.Optional(t.String()),
     cookieBrowser: t.Optional(t.String()),
     openaiModel: t.Optional(t.String()),
@@ -207,7 +234,7 @@ new Elysia()
     const title = body.videoTitle ?? ''
     const channel = body.channelName ?? ''
     const thumbnail = body.thumbnailUrl ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
-    const detail: SummaryDetail = body.detail === 'short' ? 'short' : 'long'
+    const detail = normalizeDetail(body.detail)
     const id = createSummary(videoId, body.videoUrl, lang, model, title, channel, thumbnail, detail)
     emitStep(id, title || body.videoUrl, 'queued', 'In Warteschlange...')
     processSummary(id, body.videoUrl, lang, model, title, channel, body.customPrompt, detail)
@@ -220,7 +247,7 @@ new Elysia()
     lang: t.Optional(t.String()),
     model: t.Optional(t.String()),
     customPrompt: t.Optional(t.String()),
-    detail: t.Optional(t.Union([t.Literal('short'), t.Literal('long')])),
+    detail: t.Optional(t.Union([t.Literal('short'), t.Literal('medium'), t.Literal('long')])),
   }) })
 
   .get('/api/videos/:videoId/summaries', ({ params }) => {
@@ -244,7 +271,7 @@ new Elysia()
     const ok = resetSummaryForRetry(params.id)
     if (!ok) return jsonError(set, 'Retry failed', 400)
     emitStep(summary.id, summary.videoTitle || summary.videoUrl, 'queued', 'Retry gestartet...')
-    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '', undefined, summary.detail === 'short' ? 'short' : 'long')
+    processSummary(summary.id, summary.videoUrl, summary.lang || loadSettings().defaultLang, summary.model || loadSettings().openaiModel, summary.videoTitle || '', summary.channelName || '', undefined, normalizeDetail(summary.detail))
     return { ok: true, id: summary.id, status: 'processing' }
   })
 
@@ -372,6 +399,14 @@ new Elysia()
 
   // Predictions
   .get('/api/predictions', () => getAllPredictions())
+
+  /* Katalog: übernommene + die noch nicht übernommenen aus allen Summaries.
+     Bewusst eine eigene Route – die Ableitung parst jeden Summary-Text neu.
+     `?months=3` begrenzt auf die letzten Monate, ohne den ganzen Bestand. */
+  .get('/api/predictions/all', ({ query }) => {
+    const months = Number(query.months)
+    return getPredictionCatalog(Number.isFinite(months) && months > 0 ? Math.min(months, 120) : undefined)
+  })
 
   .post('/api/predictions', ({ body }) => {
     const rows = body.predictions.map(p => ({
@@ -523,6 +558,19 @@ new Elysia()
     const ok = deleteXSummary(params.id)
     if (!ok) return jsonError(set, 'Not found')
     return { ok: true }
+  })
+
+  /* Wealth-Datenbank woechentlich hierher sichern (server/services/wealthBackup.ts).
+     `run-if-due` ruft die Oberflaeche beim Start auf und macht nur in einer neuen ISO-Woche etwas;
+     `run` ist der Knopf in den Einstellungen und laeuft immer. */
+  .get('/api/wealth-backup/status', () => getWealthBackupStatus())
+
+  .post('/api/wealth-backup/run', async ({ set }) => {
+    try { return await runWealthBackup() } catch (e) { return jsonError(set, e instanceof Error ? e.message : 'Backup fehlgeschlagen', 500) }
+  })
+
+  .post('/api/wealth-backup/run-if-due', async ({ set }) => {
+    try { return await runWealthBackupIfDue() } catch (e) { return jsonError(set, e instanceof Error ? e.message : 'Backup fehlgeschlagen', 500) }
   })
 
   .all('/api/*', ({ set }) => { set.status = 404; return { error: 'Not found' } })

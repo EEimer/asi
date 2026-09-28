@@ -9,6 +9,7 @@ Lokales Tool zum Zusammenfassen von YouTube-Videos via OpenAI. Läuft komplett a
 - **Glaskugel** – Automatisch extrahierte Asset-Prognosen aus allen Zusammenfassungen
 - **Notizen** – Einfache Notiz-Verwaltung mit Titel + Text
 - **Settings** – Prompt, Sprache, OpenAI-Modell, Cookie-Browser, Kanal-Blocklist
+- **Wealth-Backup** – wöchentliche Kopie der Wealth-Datenbank in den Documents-Ordner (siehe unten)
 - **Processing Console** – Live-Fortschritt via Server-Sent Events
 - **SwiftBar** – Menubar-Integration zum Starten/Stoppen
 
@@ -36,6 +37,9 @@ bun install
 echo 'OPENAI_API_KEY=sk-...' > .env
 ```
 
+Weitere Schlüssel in der `.env`: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` und
+`WEALTH_DB_TOKEN` (siehe „Wealth-Datenbank sichern").
+
 ## Starten
 
 ```bash
@@ -47,6 +51,36 @@ Startet beides gleichzeitig:
 - **Vite Dev Server** auf `http://localhost:5173` (React UI)
 
 Browser öffnen: http://localhost:5173
+
+## Wealth-Datenbank sichern
+
+Wealth (https://imer.at) sichert sich täglich selbst — aber auf denselben Server. ASI holt zusätzlich
+einmal pro Woche eine Kopie auf diesen Rechner, damit die Sicherung nicht am selben Ort liegt wie das
+Original.
+
+- **Wann:** beim ersten Öffnen der Oberfläche in einer neuen ISO-Woche (die beginnt montags). Läuft der
+  Rechner eine Woche gar nicht, fällt diese Woche aus — ein verpasster Montag feuert nicht nach.
+- **Wohin:** `~/Documents/#Wichtig/#Aktuell/#PrivateWealthBackup/wealth_YYYY-MM-DD.zip`.
+  Dieselbe Datei frisst in Wealth der Knopf „ZIP einspielen".
+- **Aufbewahrung:** die letzten vier Wochen bleiben wöchentlich liegen, davor nur die jeweils neueste
+  Datei je Monat. Die neueste Sicherung wird nie gelöscht.
+- **Von Hand:** *Settings → Wealth-Datenbank sichern → Jetzt erstellen*. Läuft unabhängig von der Woche.
+
+Gegenstelle ist `GET /api/db/pull` von Wealth — die Route hängt vor dem Login-Gate und erwartet statt
+einer Sitzung den Token. In der `.env` hier:
+
+```bash
+WEALTH_DB_TOKEN=…   # identisch mit DB_PULL_TOKEN in wealth/server/.env
+WEALTH_URL=https://imer.at        # optional, das ist der Standard
+WEALTH_BACKUP_DIR=/pfad/zum/ordner # optional
+```
+
+Ohne `WEALTH_DB_TOKEN` ist die Funktion still aus: kein Toast, kein Fehler, der Knopf in den Settings
+ist ausgegraut. Schlägt ein Lauf fehl, kommt ein roter Toast — ein stiller Fehlschlag hieße
+monatelang keine Sicherung, ohne dass es auffällt.
+
+Code: [server/services/wealthBackup.ts](server/services/wealthBackup.ts),
+Auslöser [src/hooks/useWeeklyWealthBackup.ts](src/hooks/useWeeklyWealthBackup.ts).
 
 ## Projektstruktur
 

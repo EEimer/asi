@@ -1,4 +1,4 @@
-import type { YouTubeVideo, SummaryListItem, Summary, SummaryDetail, Settings, Note, Prediction, ChatMessage, CustomPrompt, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, XSummary } from '../../shared/types'
+import type { YouTubeVideo, SummaryListItem, Summary, SummaryDetail, Settings, Note, Prediction, ChatMessage, CustomPrompt, TtsGenerateResponse, TtsIndex, TtsModel, TtsVoice, WealthBackupResult, WealthBackupStatus, XSummary } from '../../shared/types'
 
 const BASE = '/api'
 
@@ -136,6 +136,11 @@ export const addPredictions = (payload: {
 export const fetchPredictions = () =>
   request<Prediction[]>('/predictions', {}, 'Predictions')
 
+/** Übernommene plus die aus den Zusammenfassungen abgeleiteten Prognosen.
+    `months` begrenzt auf die letzten N Monate. */
+export const fetchPredictionCatalog = (months?: number) =>
+  request<Prediction[]>(`/predictions/all${months ? `?months=${months}` : ''}`, {}, 'Prediction catalog')
+
 export const addManualPrediction = (payload: {
   asset: string
   direction: string
@@ -186,3 +191,13 @@ export const translateXSummary = async (id: string): Promise<string> => {
   const data = await request<{ translation: string }>(`/x/${id}/translate`, { method: 'POST' }, 'Translate')
   return data.translation
 }
+
+/* Wealth-Datenbank sichern: `ifDue` laeuft beim Start und macht nur in einer neuen Woche etwas. */
+export const fetchWealthBackupStatus = () =>
+  request<WealthBackupStatus>('/wealth-backup/status', {}, 'Backup-Status')
+
+export const runWealthBackupNow = () =>
+  request<WealthBackupResult>('/wealth-backup/run', { method: 'POST' }, 'Backup')
+
+export const runWealthBackupIfDue = () =>
+  request<WealthBackupResult>('/wealth-backup/run-if-due', { method: 'POST' }, 'Backup')
