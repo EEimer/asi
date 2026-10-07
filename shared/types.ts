@@ -272,7 +272,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', short: '5.4 Mini', provider: 'openai', tier: 'gut', hint: 'Schnellste und günstigste Option' },
   { value: 'claude-sonnet-5', label: 'Claude Sonnet 5', short: 'Sonnet 5', provider: 'anthropic', tier: 'gut', hint: 'Schnell, nahe an Opus-Qualität' },
   { value: 'gpt-5.5', label: 'GPT-5.5', short: 'GPT-5.5', provider: 'openai', tier: 'mittel', hint: 'Guter Kompromiss aus Tempo und Tiefe' },
-  { value: 'claude-opus-5', label: 'Claude Opus 5', short: 'Opus 5', provider: 'anthropic', tier: 'mittel', hint: 'Stark bei langen Transkripten' },
+  { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', short: 'Opus 5.5', provider: 'anthropic', tier: 'mittel', hint: 'Stark bei langen Transkripten, günstiger als Opus 5' },
   // gpt-5.5-pro & Co. laufen nur über die Responses-API, nicht über
   // /v1/chat/completions — daher hier die neueste Chat-fähige Generation.
   { value: 'gpt-6-sol', label: 'GPT-6 Sol', short: '6 Sol', provider: 'openai', tier: 'beste', hint: 'Neueste OpenAI-Generation (Varianten: luna/sol/terra)' },
@@ -298,6 +298,7 @@ export const LEGACY_MODEL_LABELS: Record<string, string> = {
   'claude-sonnet-4-6': 'Sonnet 4.6',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-opus-4-8': 'Opus 4.8',
+  'claude-opus-5': 'Opus 5',
   'claude-opus-4-1': 'Opus 4.1',
   'claude-3-5-haiku-latest': 'Haiku 3.5',
 }
@@ -454,7 +455,7 @@ Transkript:
 `,
   defaultLang: 'de',
   cookieBrowser: 'brave',
-  openaiModel: 'gpt-5.5',
+  openaiModel: 'claude-opus-5-5',
   blockedChannels: [],
   ttsModel: 'tts-1-hd',
   ttsVoice: 'nova',

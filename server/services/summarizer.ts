@@ -68,6 +68,12 @@ function anthropicAcceptsTemperature(model: string): boolean {
   return ANTHROPIC_TEMPERATURE_MODELS.some(prefix => model.toLowerCase().startsWith(prefix))
 }
 
+/**
+ * Denk-Tiefe für alle Anthropic-Denkmodelle. Opus 5.5 läuft ohne Angabe nur auf
+ * `medium` (die übrigen auf `high`), daher explizit setzen.
+ */
+const ANTHROPIC_EFFORT = 'high'
+
 /** Denkt das Modell (Anthropic ab Opus 5 standardmäßig)? Dann mehr Budget. */
 function isAnthropicThinkingModel(model: string): boolean {
   return /^claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[78])/i.test(model)
@@ -119,7 +125,8 @@ async function callAnthropic(
 ): Promise<string> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured')
 
-  const budget = isAnthropicThinkingModel(model) ? MAX_OUTPUT_TOKENS_REASONING : MAX_OUTPUT_TOKENS
+  const thinking = isAnthropicThinkingModel(model)
+  const budget = thinking ? MAX_OUTPUT_TOKENS_REASONING : MAX_OUTPUT_TOKENS
 
   return withRetry(async () => {
     const response = await fetchOrThrow('https://api.anthropic.com/v1/messages', {
@@ -134,6 +141,7 @@ async function callAnthropic(
         system: systemPrompt,
         messages,
         ...(anthropicAcceptsTemperature(model) ? { temperature: TEMPERATURE } : {}),
+        ...(thinking ? { output_config: { effort: ANTHROPIC_EFFORT } } : {}),
         max_tokens: budget,
       }),
     }, 'Anthropic API')
