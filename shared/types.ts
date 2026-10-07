@@ -269,14 +269,14 @@ export const MODEL_TIER_LABELS: Record<ModelTier, string> = {
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', short: '5.4 Mini', provider: 'openai', tier: 'gut', hint: 'Schnellste und günstigste Option' },
-  { value: 'claude-sonnet-5', label: 'Claude Sonnet 5', short: 'Sonnet 5', provider: 'anthropic', tier: 'gut', hint: 'Schnell, nahe an Opus-Qualität' },
-  { value: 'gpt-5.5', label: 'GPT-5.5', short: 'GPT-5.5', provider: 'openai', tier: 'mittel', hint: 'Guter Kompromiss aus Tempo und Tiefe' },
+  { value: 'gpt-6-luna', label: 'GPT-6 Luna', short: '6 Luna', provider: 'openai', tier: 'gut', hint: 'Schnellste und günstigste Option' },
+  { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', short: 'Sonnet 5.5', provider: 'anthropic', tier: 'gut', hint: 'Schnell, nahe an Opus-Qualität' },
+  { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', short: '6.1 Sol', provider: 'openai', tier: 'mittel', hint: 'Guter Kompromiss aus Tempo und Tiefe' },
   { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', short: 'Opus 5.5', provider: 'anthropic', tier: 'mittel', hint: 'Stark bei langen Transkripten, günstiger als Opus 5' },
-  // gpt-5.5-pro & Co. laufen nur über die Responses-API, nicht über
-  // /v1/chat/completions — daher hier die neueste Chat-fähige Generation.
-  { value: 'gpt-6-sol', label: 'GPT-6 Sol', short: '6 Sol', provider: 'openai', tier: 'beste', hint: 'Neueste OpenAI-Generation (Varianten: luna/sol/terra)' },
-  { value: 'claude-fable-5', label: 'Claude Fable 5', short: 'Fable 5', provider: 'anthropic', tier: 'beste', hint: 'Anthropics stärkstes Modell, teuerste Option' },
+  // Die GPT-6-Modelle laufen über /v1/chat/completions nur ohne Tool-Calling —
+  // reicht hier, die App schickt keine Tools mit.
+  { value: 'gpt-6-astra', label: 'GPT-6 Astra', short: '6 Astra', provider: 'openai', tier: 'beste', hint: 'OpenAIs stärkstes Modell, teuerste Option' },
+  { value: 'claude-fable-5-1', label: 'Claude Fable 5.1', short: 'Fable 5.1', provider: 'anthropic', tier: 'beste', hint: 'Anthropics stärkstes Modell, teuerste Option' },
 ]
 
 /**
@@ -293,12 +293,17 @@ export const LEGACY_MODEL_LABELS: Record<string, string> = {
   'gpt-5.1': 'GPT-5.1',
   'gpt-5.2': 'GPT-5.2',
   'gpt-5.4': 'GPT-5.4',
+  'gpt-5.4-mini': '5.4 Mini',
+  'gpt-5.5': 'GPT-5.5',
   'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-6-sol': '6 Sol',
   'claude-haiku-4-5': 'Haiku 4.5',
   'claude-sonnet-4-6': 'Sonnet 4.6',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-opus-4-8': 'Opus 4.8',
   'claude-opus-5': 'Opus 5',
+  'claude-sonnet-5': 'Sonnet 5',
+  'claude-fable-5': 'Fable 5',
   'claude-opus-4-1': 'Opus 4.1',
   'claude-3-5-haiku-latest': 'Haiku 3.5',
 }

@@ -74,6 +74,13 @@ function anthropicAcceptsTemperature(model: string): boolean {
  */
 const ANTHROPIC_EFFORT = 'high'
 
+/**
+ * Bei diesen Modellen können Sicherheitsfilter eine Anfrage ablehnen
+ * (`stop_reason: "refusal"`). Mit `fallbacks: "default"` springt Anthropic dann
+ * serverseitig auf ein passendes Ersatzmodell, statt leer zurückzukommen.
+ */
+const ANTHROPIC_FALLBACK_MODELS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']
+
 /** Denkt das Modell (Anthropic ab Opus 5 standardmäßig)? Dann mehr Budget. */
 function isAnthropicThinkingModel(model: string): boolean {
   return /^claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[78])/i.test(model)
@@ -127,6 +134,7 @@ async function callAnthropic(
 
   const thinking = isAnthropicThinkingModel(model)
   const budget = thinking ? MAX_OUTPUT_TOKENS_REASONING : MAX_OUTPUT_TOKENS
+  const fallback = ANTHROPIC_FALLBACK_MODELS.includes(model.toLowerCase())
 
   return withRetry(async () => {
     const response = await fetchOrThrow('https://api.anthropic.com/v1/messages', {
@@ -135,6 +143,7 @@ async function callAnthropic(
         'Content-Type': 'application/json',
         'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
+        ...(fallback ? { 'anthropic-beta': 'server-side-fallback-2026-07-01' } : {}),
       },
       body: JSON.stringify({
         model,
@@ -142,11 +151,18 @@ async function callAnthropic(
         messages,
         ...(anthropicAcceptsTemperature(model) ? { temperature: TEMPERATURE } : {}),
         ...(thinking ? { output_config: { effort: ANTHROPIC_EFFORT } } : {}),
+        ...(fallback ? { fallbacks: 'default' } : {}),
         max_tokens: budget,
       }),
     }, 'Anthropic API')
 
     const data = await response.json() as any
+    // Auch das Ersatzmodell kann ablehnen — dann lieber klar scheitern als eine
+    // leere Zusammenfassung speichern.
+    if (data.stop_reason === 'refusal') {
+      const category = data.stop_details?.category
+      throw new Error(`Anthropic ${model} hat die Anfrage abgelehnt${category ? ` (${category})` : ''}`)
+    }
     // Denk-Blöcke überspringen und den eigentlichen Antworttext einsammeln.
     const texts = (data.content ?? [])
       .filter((c: any) => c?.type === 'text')
