@@ -2,12 +2,24 @@
 #
 # rebuild-quickaction.sh
 #
-# Baut die drei Audio-Schnellaktionen neu und bettet den aktuellen Inhalt von
+# Baut die Audio-Umschalter neu und bettet den aktuellen Inhalt von
 # audio-toggle.sh jeweils direkt ein:
 #
-#   Audio Kopfhörer      ⌃⇧⌘Q   -> headphones
-#   Audio MacBook        ⌃⇧⌘A   -> builtin
-#   Audio Lautsprecher   ⌃⇧⌘Z   -> speakers
+#   Alfred-Workflow „Audio-Umschalter" (Haupttasten, global):
+#     ⌥1   -> headphones
+#     ⌥2   -> speakers
+#     ⌥3   -> builtin
+#
+#   Automator-Schnellaktionen (Ersatz, falls Alfred nicht läuft):
+#     Audio Kopfhörer      ⌃⇧⌘Q   -> headphones
+#     Audio MacBook        ⌃⇧⌘A   -> builtin
+#     Audio Lautsprecher   ⌃⇧⌘Z   -> speakers
+#
+# Warum Alfred für die Haupttasten?
+# Dienste-Kürzel laufen über das Menü der aktiven App: Die App gewinnt bei
+# Konflikten, und Kürzel ohne ⌘ greifen in frisch gestarteten Apps oft erst,
+# nachdem man dort einmal das Dienste-Menü geöffnet hat. Alfred-Hotkeys sind
+# echte globale Hotkeys — sie greifen vor jeder App, auch nur mit ⌥.
 #
 # Jede Aktion ist dieselbe eingebettete Kopie des Skripts, nur mit fest
 # verdrahtetem Modus (per `set -- <modus>` vorangestellt). Es wird also nicht
@@ -42,6 +54,19 @@ MODES=(
   "builtin|Audio MacBook|@^\$a|⌃⇧⌘A"
   "speakers|Audio Lautsprecher|@^\$z|⌃⇧⌘Z"
 )
+
+# Alfred-Hotkeys: Modus | macOS-Tastencode | Taste | Anzeige
+#   Tastencodes: 18 = 1, 19 = 2, 20 = 3 (unabhängig vom Tastaturlayout)
+#   Modifier ist überall ⌥ (option); ändern in ALFRED_MOD unten.
+ALFRED_KEYS=(
+  "headphones|18|1|⌥1"
+  "speakers|19|2|⌥2"
+  "builtin|20|3|⌥3"
+)
+ALFRED_MOD=524288                 # ⌥ = 524288, ⌃ = 262144, ⇧ = 131072, ⌘ = 1048576
+ALFRED_BUILD="alfred-audio"       # Build-Ordner hier in scripts/
+ALFRED_BUNDLE="local.asi.audio-umschalter"
+ALFRED_UID="7A3E1C52-9B4D-4E8F-A1C6-3D2B5F0E9A47"   # fester Ordnername in Alfred
 
 # --- Bundles bauen ------------------------------------------------------------
 
@@ -151,6 +176,83 @@ print(f'Gebaut: {name}.workflow  (Modus: {mode})')
 PY
 done
 
+# --- Alfred-Workflow bauen ----------------------------------------------------
+#
+# Ein Workflow mit drei Hotkey-Triggern, jeder mit eigener eingebetteter Kopie
+# von audio-toggle.sh (fester Modus wie bei den Schnellaktionen).
+
+ALFRED_JOINED=$(printf '%s\n' "${ALFRED_KEYS[@]}")
+ALFRED_JOINED="$ALFRED_JOINED" ALFRED_MOD="$ALFRED_MOD" ALFRED_BUILD="$ALFRED_BUILD" \
+ALFRED_BUNDLE="$ALFRED_BUNDLE" python3 << 'PY'
+import os, plistlib, uuid
+
+entries = [l.split('|') for l in os.environ['ALFRED_JOINED'].splitlines() if l.strip()]
+hotmod = int(os.environ['ALFRED_MOD'])
+out_dir = os.environ['ALFRED_BUILD']
+
+with open('audio-toggle.sh', 'r', encoding='utf-8') as f:
+    lines = f.read().split('\n')
+if lines and lines[0].startswith('#!'):
+    lines = lines[1:]
+body = '\n'.join(lines).strip() + '\n'
+
+ns = uuid.UUID('6f9b1c2e-4d3a-4f7b-9e51-2a8c0d6b4f13')
+def uid(part):
+    return str(uuid.uuid5(ns, f'alfred:{part}')).upper()
+
+objects, connections, uidata = [], {}, {}
+for row, (mode, keycode, key, shown) in enumerate(entries):
+    trig, act = uid(f'{mode}:trigger'), uid(f'{mode}:script')
+    objects.append({
+        'type': 'alfred.workflow.trigger.hotkey', 'uid': trig, 'version': 2,
+        'config': {
+            'action': 0, 'argument': 0,            # argument 0 = kein Argument
+            'focusedappvariable': False, 'focusedappvariablename': '',
+            'hotkey': int(keycode), 'hotmod': hotmod, 'hotstring': key,
+            'leftcursor': False, 'modsmode': 0, 'relatedAppsMode': 0,
+        },
+    })
+    # `set --` steht vorn und überschreibt, was Alfred als $1 mitgibt.
+    header = (f'# Von rebuild-quickaction.sh erzeugt — Alfred-Hotkey {shown}, '
+              f'fester Modus.\nset -- {mode}\n\n')
+    objects.append({
+        'type': 'alfred.workflow.action.script', 'uid': act, 'version': 2,
+        'config': {
+            'concurrently': False, 'escaping': 0, 'script': header + body,
+            'scriptargtype': 1, 'scriptfile': '', 'type': 0,   # type 0 = /bin/bash
+        },
+    })
+    connections[trig] = [{'destinationuid': act, 'modifiers': 0,
+                          'modifiersubtext': '', 'vitoclose': False}]
+    uidata[trig] = {'xpos': 40, 'ypos': 40 + row * 140}
+    uidata[act] = {'xpos': 300, 'ypos': 40 + row * 140}
+
+info = {
+    'bundleid': os.environ['ALFRED_BUNDLE'],
+    'category': 'Tools',
+    'connections': connections,
+    'createdby': '',
+    'description': 'Audio-Ausgang umschalten: ' +
+                   ' · '.join(f'{e[3]} {e[0]}' for e in entries),
+    'disabled': False,
+    'name': 'Audio-Umschalter',
+    'objects': objects,
+    'readme': 'Erzeugt von scripts/rebuild-quickaction.sh im asi-Repo. '
+              'Nicht hier bearbeiten — Änderungen gehen beim nächsten Rebuild verloren.',
+    'uidata': uidata,
+    'variablesdontexport': [],
+    'version': '',
+    'webaddress': '',
+}
+
+os.makedirs(out_dir, exist_ok=True)
+with open(os.path.join(out_dir, 'info.plist'), 'wb') as f:
+    plistlib.dump(info, f)
+
+print(f'Gebaut: {out_dir}/info.plist  (Alfred: ' +
+      ', '.join(f'{e[3]} {e[0]}' for e in entries) + ')')
+PY
+
 if [ "$1" != "--install" ]; then
   echo
   echo "Zum Installieren:  ./rebuild-quickaction.sh --install"
@@ -210,8 +312,30 @@ PY
 /System/Library/CoreServices/pbs -flush 2>/dev/null || true
 /System/Library/CoreServices/pbs -update 2>/dev/null || true
 
+# --- Alfred-Workflow installieren ---------------------------------------------
+#
+# Ziel ist der aktive Alfred-Einstellungsordner (prefs.json -> "current"),
+# damit es auch bei synchronisierten Einstellungen stimmt. Alfred beobachtet
+# den Ordner und lädt den Workflow selbst.
+
+ALFRED_PREFS=$(python3 -c '
+import json, os
+p = os.path.expanduser("~/Library/Application Support/Alfred/prefs.json")
+print(json.load(open(p))["current"])' 2>/dev/null || true)
+
+if [ -n "$ALFRED_PREFS" ] && [ -d "$ALFRED_PREFS/workflows" ]; then
+  ALFRED_WF="$ALFRED_PREFS/workflows/user.workflow.$ALFRED_UID"
+  mkdir -p "$ALFRED_WF"
+  cp "$ALFRED_BUILD/info.plist" "$ALFRED_WF/info.plist"
+  echo "Installiert: $ALFRED_WF"
+else
+  echo "Alfred-Einstellungen nicht gefunden — Alfred-Hotkeys übersprungen."
+fi
+
 open -g "swiftbar://refreshallplugins" >/dev/null 2>&1 || true
 
 echo
-echo "Fertig. ⌃⇧⌘Q Kopfhörer · ⌃⇧⌘A MacBook · ⌃⇧⌘Z Lautsprecher"
-echo "Greift eine Kombi in einer bereits offenen App nicht, diese App einmal neu starten."
+echo "Fertig."
+echo "  Alfred (global):    ⌥1 Kopfhörer · ⌥2 Lautsprecher · ⌥3 MacBook"
+echo "  Schnellaktionen:    ⌃⇧⌘Q Kopfhörer · ⌃⇧⌘Z Lautsprecher · ⌃⇧⌘A MacBook"
+echo "Greift ⌥1–3 nicht: Alfred-Einstellungen → Workflows einmal öffnen (lädt neu)."

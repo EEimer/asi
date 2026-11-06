@@ -7,11 +7,16 @@ dann nicht nutzbar.
 Jedes Ziel hat eine eigene Tastenkombination — es wird **nicht** weiter-
 geschaltet, dieselbe Taste führt immer zum selben Gerät:
 
-| Taste | Ziel |
-|---|---|
-| **⌃⇧⌘Q** | 🎧 Kopfhörer |
-| **⌃⇧⌘A** | 💻 MacBook intern |
-| **⌃⇧⌘Z** | 🔊 Lautsprecher (USB) |
+| Taste | Ersatz | Ziel |
+|---|---|---|
+| **⌥1** | ⌃⇧⌘Q | 🎧 Kopfhörer |
+| **⌥2** | ⌃⇧⌘Z | 🔊 Lautsprecher (USB) |
+| **⌥3** | ⌃⇧⌘A | 💻 MacBook intern |
+
+**⌥1–3** sind globale Alfred-Hotkeys (Workflow „Audio-Umschalter“). Sie greifen
+vor jeder App, auch in Textfeldern. Dafür lassen sich ¡ ™ £ nicht mehr über
+⌥1–3 tippen. Die **Ersatz**-Kombis sind die Automator-Schnellaktionen. Sie
+funktionieren auch ohne Alfred, verlieren aber gegen gleichlautende App-Kürzel.
 
 Alternativ über das SwiftBar-Plugin `../bar/bar.sh` oder direkt im Terminal.
 
@@ -33,7 +38,8 @@ brew install switchaudio-osx
 | Datei | Zweck |
 |---|---|
 | `audio-toggle.sh` | Das eigentliche Skript — einzige Quelle der Wahrheit |
-| `rebuild-quickaction.sh` | Baut die drei Schnellaktionen, bettet das Skript ein, setzt die Tasten |
+| `rebuild-quickaction.sh` | Baut Schnellaktionen + Alfred-Workflow, bettet das Skript ein, setzt die Tasten |
+| `alfred-audio/info.plist` | Alfred-Workflow für ⌥1 / ⌥2 / ⌥3 (gebaut, nicht von Hand bearbeiten) |
 | `Audio Kopfhörer.workflow` | Schnellaktion für ⌃⇧⌘Q |
 | `Audio MacBook.workflow` | Schnellaktion für ⌃⇧⌘A |
 | `Audio Lautsprecher.workflow` | Schnellaktion für ⌃⇧⌘Z |
@@ -83,6 +89,23 @@ Das SwiftBar-Plugin ruft `audio-toggle.sh` normal per Pfad auf und braucht
 keinen Rebuild — SwiftBar hat den Ordnerzugriff.
 
 ## Tastenkombinationen
+
+### Alfred (⌥1–3)
+
+`rebuild-quickaction.sh --install` kopiert `alfred-audio/info.plist` in den
+aktiven Alfred-Einstellungsordner (`workflows/user.workflow.7A3E1C52-…`).
+Alfred lädt ihn selbst; falls nicht, Alfred-Einstellungen → Workflows einmal
+öffnen. Alfred-Hotkeys brauchen das Powerpack.
+
+Andere Tasten: in `rebuild-quickaction.sh` `ALFRED_KEYS` (Tastencodes) bzw.
+`ALFRED_MOD` (Modifier) anpassen und `--install` erneut laufen lassen.
+
+Warum nicht einfach die Schnellaktionen mit ⌥1? Dienste-Kürzel laufen über das
+Menü der aktiven App: Die App gewinnt bei Konflikten, und Kürzel ohne ⌘ greifen
+in frisch gestarteten Apps oft erst, nachdem man dort einmal das Dienste-Menü
+geöffnet hat.
+
+### Schnellaktionen (Ersatz)
 
 `rebuild-quickaction.sh --install` setzt sie selbst, über die Domain `pbs`
 (`NSServicesStatus`, Modifier-Kürzel: `@` cmd, `^` ctrl, `$` shift, `~` option).

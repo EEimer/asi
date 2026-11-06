@@ -15,10 +15,10 @@
 #   audio-toggle.sh speakers
 #   audio-toggle.sh status      -> nur ausgeben, nichts ändern
 #
-# Tastenkombinationen (je eine Schnellaktion pro Ziel, kein Weiterschalten):
-#   ⌃⇧⌘Q  headphones
-#   ⌃⇧⌘A  builtin
-#   ⌃⇧⌘Z  speakers
+# Tastenkombinationen (je eine pro Ziel, kein Weiterschalten):
+#   ⌥1  headphones   (Alfred-Hotkey, global — Ersatz: ⌃⇧⌘Q Schnellaktion)
+#   ⌥2  speakers     (Alfred-Hotkey, global — Ersatz: ⌃⇧⌘Z Schnellaktion)
+#   ⌥3  builtin      (Alfred-Hotkey, global — Ersatz: ⌃⇧⌘A Schnellaktion)
 # Gebaut und installiert von rebuild-quickaction.sh — nach jeder Änderung hier
 # unbedingt `./rebuild-quickaction.sh --install` ausführen.
 #
